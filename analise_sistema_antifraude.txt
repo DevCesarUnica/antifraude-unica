@@ -1,0 +1,434 @@
+================================================================================
+  ANÁLISE TÉCNICA — SISTEMA ANTIFRAUDE E AUTOMAÇÃO DE PROPOSTAS FINANCEIRAS
+================================================================================
+  Documento gerado em: 10/06/2026
+  Empresa: Unica Promotora
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. VISÃO GERAL DO PROJETO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Objetivo central:
+  Automatizar o processo de aprovação de propostas em múltiplos bancos,
+  reduzindo risco de fraude e operação manual. Substituir solução atual
+  de fornecedor (WebDeck + Storm) por plataforma própria.
+
+Contexto atual:
+  - Sistema atual gerenciado por fornecedor externo (WebDeck + Storm)
+  - Dependência de RPA em alguns bancos
+  - Necessidade de maior controle sobre regras e integrações
+
+Fluxo principal:
+  1. Importação de propostas dos bancos (via API ou RPA)
+  2. Identificação do corretor/parceiro vinculado
+  3. Aplicação do motor de regras antifraude
+  4. Decisão automática: aprovação / análise manual / bloqueio
+  5. Execução da ação no banco (quando aprovação automática)
+  6. Registro completo para auditoria
+
+Critérios de decisão do motor de regras:
+  - Valor da proposta vs. limite do corretor
+  - Banco e convênio
+  - UF e outras regras configuráveis
+  - Presença em blacklist
+
+Componentes do sistema:
+  - Motor de regras (antifraude e limites operacionais)
+  - Integração com APIs bancárias
+  - Automação via RPA (bancos sem API)
+  - Blacklist integrada (sincronizada com Storm)
+  - Painel operacional com filas:
+      · Propostas para análise manual
+      · Propostas aprovadas
+      · Erros de automação
+      · Pendências
+  - Cadastro e gestão de corretores e seus limites
+  - Mapeamento de convênios
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. VIABILIDADE TÉCNICA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Veredicto: VIÁVEL, mas não trivial.
+
+Todos os componentes descritos são tecnicamente resolvidos. O desafio não é
+inventar nada novo — é integrar corretamente num domínio com alta exigência
+de confiabilidade e auditoria. O risco técnico principal está nas integrações
+externas (bancos), não na plataforma em si.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. PRINCIPAIS RISCOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  RISCO                                        SEVERIDADE
+  ─────────────────────────────────────────────────────────
+  RPA quebrando por mudança de layout          ALTA
+  Sincronização com Storm (blacklist)          MÉDIA
+  Falha silenciosa na automação                ALTA
+  Regras antifraude incompletas na largada     MÉDIA
+  Disponibilidade dos bancos                   MÉDIA
+  Perda de rastreabilidade em falhas async     ALTA
+
+Risco mais subestimado:
+  O sistema atual (WebDeck + Storm) acumulou anos de calibração de regras.
+  Reproduzir isso do zero pode gerar um período de maior exposição a fraude
+  durante a transição. Migração gradual é essencial.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. COMPLEXIDADE DE IMPLEMENTAÇÃO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  COMPONENTE                          COMPLEXIDADE
+  ──────────────────────────────────────────────────
+  Plataforma base (painel, CRUD)      MÉDIA
+  Motor de regras extensível          MÉDIA-ALTA
+  Integrações via API bancária        MÉDIA
+  Automação via RPA                   ALTA
+  Sincronização blacklist/Storm       MÉDIA-ALTA
+  Auditoria e rastreabilidade         MÉDIA
+
+Complexidade geral: ALTA (pela soma das partes e exigência de confiabilidade)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. PONTOS CRÍTICOS DE ARQUITETURA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Os itens abaixo precisam ser definidos ANTES da implementação:
+
+a) Idempotência nas automações
+   Uma proposta não pode ser enviada ao banco duas vezes por falha de rede
+   ou retry. Cada operação precisa de identificador único e verificação
+   de estado antes de executar.
+
+b) Dead-letter e observabilidade nas filas
+   Toda mensagem que falha precisa ir para uma fila de erros com contexto
+   completo. Sem isso, não é possível saber o que quebrou.
+
+c) Separação entre "decisão" e "execução"
+   O motor de regras decide (aprovado / manual / bloqueado).
+   O robô executa. Esses dois processos devem ser desacoplados —
+   a decisão é registrada independente do sucesso da execução.
+
+d) Imutabilidade do log de auditoria
+   Nenhum registro de proposta, decisão ou ação pode ser editado ou
+   deletado. Modelo append-only. Requisito regulatório implícito em
+   operações financeiras.
+
+e) Circuit breaker nas integrações externas
+   Se um banco fica fora por 30 minutos, o sistema não pode travar.
+   Precisa enfileirar, alertar e retomar quando a integração voltar.
+
+f) Versionamento de regras
+   Quando uma regra antifraude é alterada, é necessário saber qual regra
+   estava vigente quando cada proposta foi avaliada.
+   Regra sem versionamento é passivo jurídico.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. SUGESTÕES DE SIMPLIFICAÇÃO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  - Priorizar APIs sobre RPA desde o início. Mesmo com mais esforço de
+    negociação, é imensamente mais estável a longo prazo.
+
+  - Motor de regras em tabela configurável (não em código), permitindo
+    que o time operacional ajuste limites sem necessidade de deploy.
+
+  - Blacklist própria com sincronização eventual, não em tempo real.
+    Sincronizar periodicamente com o Storm e consultar localmente.
+
+  - Fila única de entrada, múltiplas saídas. Toda proposta entra pelo
+    mesmo ponto e o roteamento acontece internamente.
+
+  - Começar sem RPA. Lançar apenas com os bancos que têm API.
+    Adicionar RPA depois, com a plataforma já estável.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. APIs vs. RPA — TRADE-OFFS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  CRITÉRIO                   API                    RPA
+  ──────────────────────────────────────────────────────────────────
+  Estabilidade               Alta                   Baixa
+  Velocidade de execução     Alta                   Baixa
+  Custo de manutenção        Baixo                  Alto
+  Rastreabilidade            Excelente              Fraca
+  Negociação necessária      Sim                    Não
+  Tempo para implementar     Médio                  Alto
+
+Recomendação:
+  RPA apenas como último recurso, para bancos sem API e com volume que
+  justifique o custo de manutenção contínua.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. ESTRATÉGIAS DE ESCALABILIDADE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  - Processamento 100% assíncrono desde o início (nunca bloquear o usuário)
+  - Isolamento por banco: cada integração em worker separado
+  - Rate limiting nas integrações para não ter IP bloqueado pelos bancos
+  - Monitoramento ativo: alertas para fila crescendo, taxa de erro subindo,
+    RPA sem executar há N minutos
+  - Deploy gradual de regras: nova regra em modo "shadow" antes de produção
+    (registra a decisão mas não bloqueia, permitindo validação)
+  - Cache para leitura de blacklist e regras (consultadas em todo request),
+    com invalidação controlada
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. STACK TECNOLÓGICA RECOMENDADA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Por que Python como base:
+  Melhor ecossistema para RPA, excelente suporte a async/filas,
+  curva de aprendizado acessível, FastAPI é extremamente produtivo.
+
+  COMPONENTE              TECNOLOGIA               JUSTIFICATIVA
+  ─────────────────────────────────────────────────────────────────────────
+  Backend / API           FastAPI (Python)         Produtivo, async nativo
+  Filas / Workers         Celery + Redis           Battle-tested, isolamento
+  Banco de dados          PostgreSQL               JSONB, auditoria, robusto
+  Frontend / Painel       Next.js + shadcn/ui      Componentes prontos, rápido
+  Automação RPA           Playwright (Python)      Mais estável que Selenium
+  Autenticação            JWT + RBAC simples       Suficiente para o escopo
+  Containerização         Docker + Compose         Portabilidade e isolamento
+  Monitoramento           Sentry + logs estruturados  Free tier suficiente
+
+Detalhes por componente:
+
+  Motor de regras:
+    Tabela no PostgreSQL com regras configuráveis em JSON + Python avaliando
+    em runtime. Não usar biblioteca externa — adiciona complexidade sem ganho.
+
+  Filas assíncronas:
+    Celery + Redis. Cada banco vira um worker isolado.
+    Dead-letter nativo com task_acks_late=True.
+
+  RPA:
+    Playwright > Selenium. Mais estável, headless nativo, suporte a múltiplos
+    contextos de sessão. Cada banco é um script Python separado.
+
+  Banco de dados:
+    PostgreSQL com JSONB para dados variáveis por banco.
+    Particionamento por data nas tabelas de auditoria desde o início.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. ESTIMATIVA DE TEMPO — ESTAGIÁRIO + CLAUDE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+O que Claude acelera:
+  - Geração de código boilerplate (CRUD, modelos, rotas)
+  - Debugging de erros pontuais
+  - Scaffold de integrações com documentação de API
+  - Scripts de Playwright para RPA
+
+O que Claude não substitui:
+  - Entendimento do domínio financeiro para calibrar regras
+  - Decisões arquiteturais que só aparecem em produção
+  - Testes em ambiente real com dados reais dos bancos
+  - Debugging de falhas silenciosas em produção
+
+Estimativa por fase:
+
+  FASE   ESCOPO                                                  TEMPO
+  ───────────────────────────────────────────────────────────────────────────
+  1      Auth, cadastro de corretores, limites, filas, painel    6–8 semanas
+  2      Motor de regras, blacklist, auditoria                   4–6 semanas
+  3      Integrações API (2–3 bancos), circuit breaker, retry    6–10 semanas
+  4      RPA Playwright (por banco)                              6–8 sem/banco
+  5      Testes, monitoramento, edge cases, docs operacionais    4–6 semanas
+
+Resumo por cenário:
+
+  CENÁRIO                                              TEMPO ESTIMADO
+  ───────────────────────────────────────────────────────────────────
+  MVP funcional (sem RPA, 1 banco, regras básicas)     3–4 meses
+  Sistema completo com qualidade de produção           8–12 meses
+  100% funcional e alto nível (conforme especificado)  12–18 meses
+
+Observação importante:
+  O estagiário precisa de acompanhamento técnico de um dev sênior por
+  pelo menos 2–4 horas/semana para revisar decisões arquiteturais.
+  Sem isso, o risco é código que funciona no happy path mas falha
+  silenciosamente em produção — crítico em sistema financeiro.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+11. SIMULAÇÃO DE CUSTOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────
+11.1 FERRAMENTAS DE DESENVOLVIMENTO
+────────────────────────────────────────
+
+  FERRAMENTA              USO                          CUSTO MENSAL
+  ──────────────────────────────────────────────────────────────────
+  VS Code                 IDE principal                Gratuito
+  GitHub (Team)           Repositório + CI/CD básico   R$ 24/mês
+  Claude Pro              Assistência ao estagiário    R$ 115/mês
+  Postman                 Teste de APIs                Gratuito
+  Docker Desktop          Containerização local        Gratuito
+  draw.io / Excalidraw    Diagramas de arquitetura     Gratuito
+  ──────────────────────────────────────────────────────────────────
+  SUBTOTAL                                             ~R$ 140/mês
+
+────────────────────────────────────────
+11.2 INFRAESTRUTURA — DESENVOLVIMENTO
+────────────────────────────────────────
+
+  SERVIÇO                         ESPECIFICAÇÃO               CUSTO MENSAL
+  ──────────────────────────────────────────────────────────────────────────
+  VPS Homologação (Contabo/Hetzner) 4 vCPU, 8GB RAM, 200GB SSD  R$ 90–130/mês
+  ──────────────────────────────────────────────────────────────────────────
+  SUBTOTAL                                                      ~R$ 110/mês
+
+────────────────────────────────────────
+11.3 INFRAESTRUTURA — PRODUÇÃO
+────────────────────────────────────────
+
+  SERVIÇO                      DESCRIÇÃO                        CUSTO MENSAL
+  ──────────────────────────────────────────────────────────────────────────
+  VPS Principal                API + PostgreSQL + Redis          R$ 130/mês
+                               (4 vCPU, 8GB RAM)
+  VPS Workers                  Celery + RPA Playwright           R$ 130/mês
+                               (4 vCPU, 8GB RAM)
+  Backup automático            Snapshot semanal do banco         R$ 25/mês
+  Cloudflare (free)            SSL, DDoS básico, cache           Gratuito
+  ──────────────────────────────────────────────────────────────────────────
+  SUBTOTAL                                                       ~R$ 285/mês
+
+  Alternativa AWS São Paulo (melhor para LGPD):
+    EC2 t3.medium + RDS + ElastiCache → R$ 500–700/mês
+    Mais resiliência, porém custo maior.
+
+────────────────────────────────────────
+11.4 SERVIÇOS DE TERCEIROS
+────────────────────────────────────────
+
+  SERVIÇO          USO                              CUSTO MENSAL
+  ──────────────────────────────────────────────────────────────
+  Sentry           Monitoramento de erros           Gratuito (até 5K eventos)
+  UptimeRobot      Monitoramento de disponibilidade Gratuito
+  Resend/SendGrid  E-mails de alerta operacional    Gratuito (até 100/dia)
+  Domínio .com.br  Domínio da aplicação             R$ 4/mês (R$ 50/ano)
+  SSL              Let's Encrypt via Cloudflare     Gratuito
+  Notion / Linear  Gestão de tarefas do projeto     Gratuito
+  ──────────────────────────────────────────────────────────────
+  SUBTOTAL                                          ~R$ 4/mês
+
+────────────────────────────────────────
+11.5 RECURSOS HUMANOS
+────────────────────────────────────────
+
+  PERFIL                    DEDICAÇÃO        CUSTO MENSAL
+  ─────────────────────────────────────────────────────────
+  Estagiário (dev)          30h/semana       R$ 1.500–2.500/mês
+  Dev sênior (revisão)      4–8h/semana      R$ 3.000–6.000/mês
+                            (freelance ~R$ 180–250/hora)
+
+────────────────────────────────────────
+11.6 TOTAL POR FASE
+────────────────────────────────────────
+
+  FASE DE DESENVOLVIMENTO (12 meses):
+
+  ITEM                              CUSTO TOTAL ESTIMADO
+  ──────────────────────────────────────────────────────
+  Estagiário (12 meses)             R$ 21.600–30.000
+  Dev sênior revisão (12 meses)     R$ 36.000–72.000
+  Ferramentas de desenvolvimento    R$ 1.680
+  Infraestrutura de homologação     R$ 1.320
+  Serviços de terceiros             R$ 480
+  ──────────────────────────────────────────────────────
+  TOTAL DESENVOLVIMENTO             R$ 61.000–106.000
+
+  OPERAÇÃO MENSAL (pós go-live):
+
+  ITEM                         CUSTO MENSAL
+  ─────────────────────────────────────────
+  Infraestrutura produção      R$ 285–700
+  Ferramentas e serviços       R$ 145
+  Manutenção técnica           R$ 1.500–3.000
+  ─────────────────────────────────────────
+  TOTAL MENSAL OPERACIONAL     R$ 1.930–3.845/mês
+  TOTAL ANUAL OPERACIONAL      R$ 23.000–46.000/ano
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+12. CONSTRUIR INTERNAMENTE vs. MANTER FORNECEDOR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  CRITÉRIO                      SOLUÇÃO PRÓPRIA         FORNECEDOR
+  ──────────────────────────────────────────────────────────────────────
+  Custo de implantação          R$ 61k–106k             Geralmente zero/baixo
+  Custo mensal operacional      R$ 2k–4k                R$ 3k–15k+ (estimado)
+  Break-even estimado           12–24 meses             —
+  Controle sobre regras         Total                   Limitado
+  Dependência externa           Zero (após migração)    Alta
+  Risco técnico inicial         Alto                    Baixo
+  Escalabilidade de custo       Linear / controlada     Por volume de propostas
+
+Quando vale construir internamente:
+  - Existe time técnico disponível (ou capacidade de contratar)
+  - Custo do fornecedor é relevante e cresce com volume
+  - É necessária flexibilidade que o fornecedor não oferece
+  - Há disposição para 3–6 meses de desenvolvimento antes de migrar
+
+Quando manter o fornecedor:
+  - Time técnico sem experiência em sistemas assíncronos e integrações bancárias
+  - Volume de propostas ainda é baixo
+  - É necessário o sistema funcionando em menos de 2 meses
+
+────────────────────────────────────────
+Estratégia recomendada: MIGRAÇÃO FASEADA
+────────────────────────────────────────
+
+  Etapa 1: Construir painel operacional + motor de regras + gestão de
+           corretores (sem integrações bancárias)
+
+  Etapa 2: Integrar 1–2 bancos com API (os de maior volume)
+
+  Etapa 3: Rodar em paralelo com o fornecedor por 60–90 dias,
+           comparando decisões e calibrando regras
+
+  Etapa 4: Migrar completamente quando taxa de divergência for aceitável
+
+  Etapa 5: Adicionar RPA para os bancos restantes (sem API)
+
+  Isso reduz o risco de exposição a fraude durante a transição e permite
+  calibrar as regras com dados reais antes de operar de forma independente.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+13. RESUMO EXECUTIVO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  O projeto é tecnicamente viável e faz sentido estratégico no médio prazo.
+  O maior risco não é tecnológico — é a calibração das regras antifraude
+  e a dependência de RPA.
+
+  Uma arquitetura bem desenhada com filas, auditoria e separação entre
+  decisão e execução resolve os desafios técnicos. A chave é não tentar
+  substituir tudo de uma vez.
+
+  Custo total estimado para desenvolvimento completo: R$ 61.000–106.000
+  Custo operacional anual após lançamento:            R$ 23.000–46.000
+
+  Provisionar 20% do orçamento de desenvolvimento como margem para
+  edge cases e calibração de regras que só aparecem em produção.
+
+  Se o fornecedor atual custa acima de R$ 5.000/mês, a solução própria
+  se paga em menos de 2 anos.
+
+================================================================================
+  Fim do documento
+================================================================================

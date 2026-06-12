@@ -25,6 +25,7 @@ out/
 
 # Banco de dados e segredos
 *.sqlite3
+*.db
 .env*
 secrets/
 *.key

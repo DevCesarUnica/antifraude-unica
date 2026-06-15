@@ -5,6 +5,8 @@ Idempotente: verifica existencia antes de inserir.
 Uso: python seed.py  (a partir da pasta backend/)
 """
 
+from __future__ import annotations
+
 import hashlib
 import os
 import sqlite3
@@ -16,7 +18,7 @@ import random
 sys.path.insert(0, os.path.dirname(__file__))
 
 # Migração: adiciona colunas email e role se não existirem
-_db_path = os.path.join(os.path.dirname(__file__), "antifraude.db")
+_db_path = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "antifraude.db"))
 if os.path.exists(_db_path):
     _conn = sqlite3.connect(_db_path)
     _cur = _conn.cursor()

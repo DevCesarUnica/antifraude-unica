@@ -24,8 +24,8 @@ function formatCurrency(value) {
 function StatPill({ label, value, color }) {
   return (
     <div
-      className="flex flex-col items-center justify-center px-5 py-3 rounded-xl"
-      style={{ backgroundColor: 'var(--bg-card)', minWidth: '140px' }}
+      className="flex flex-col items-center justify-center px-4 py-3 rounded-xl flex-shrink-0"
+      style={{ backgroundColor: 'var(--bg-card)', minWidth: '130px' }}
     >
       <span className="text-xs uppercase tracking-wide font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
         {label}
@@ -69,7 +69,8 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col gap-6">
       {/* Stats rápidas */}
-      <div className="flex flex-wrap gap-3 items-center">
+      <div className="overflow-x-auto pb-1 -mx-1 px-1">
+      <div className="flex gap-3 items-center" style={{ minWidth: 'max-content' }}>
         <StatPill label="Total de Propostas" value={totalPropostas} color="var(--text-primary)" />
         <StatPill label="Valor Total" value={formatCurrency(totalValor)} color="#16A34A" />
         <StatPill label="Taxa de Aprovação" value={`${aprovacaoPct}%`} color="#2563EB" />
@@ -98,6 +99,7 @@ export default function Dashboard() {
             Limpar filtro
           </button>
         )}
+      </div>
       </div>
 
       {/* Grid de StatusCards */}

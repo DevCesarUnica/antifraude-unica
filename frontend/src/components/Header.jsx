@@ -24,11 +24,9 @@ export default function Header() {
       style={{
         backgroundColor: 'var(--bg-primary)',
         borderBottom: '1px solid #DC2626',
-        height: '64px',
-        paddingLeft: '24px',
-        paddingRight: '24px',
+        minHeight: '56px',
       }}
-      className="flex items-center justify-between w-full sticky top-0 z-50"
+      className="flex items-center justify-between w-full sticky top-0 z-50 px-3 sm:px-6 py-2 sm:py-0 sm:h-16"
     >
       {/* Lado esquerdo: Logo + Nome */}
       <div className="flex items-center gap-3">
@@ -37,9 +35,10 @@ export default function Header() {
           className="flex items-center gap-3 focus:outline-none"
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
         >
-          <img src={logo} alt="Unica Promotora" style={{ height: '40px', width: 'auto' }} className="flex-shrink-0" />
+          <img src={logo} alt="Unica Promotora" style={{ height: '36px', width: 'auto' }} className="flex-shrink-0" />
 
-          <div className="flex flex-col leading-tight text-left">
+          {/* Texto "Unica Promotora" — oculto em telas pequenas */}
+          <div className="hidden sm:flex flex-col leading-tight text-left">
             <span className="font-bold text-sm tracking-wide" style={{ color: 'var(--text-primary)' }}>
               Unica Promotora
             </span>
@@ -48,14 +47,14 @@ export default function Header() {
             </span>
           </div>
 
-          {/* Divider */}
-          <div style={{ width: '1px', height: '32px', backgroundColor: 'var(--border)', margin: '0 4px' }} />
+          {/* Divider — oculto em telas pequenas */}
+          <div className="hidden sm:block" style={{ width: '1px', height: '32px', backgroundColor: 'var(--border)', margin: '0 4px' }} />
 
           <div className="flex flex-col leading-tight text-left">
             <span className="font-black text-sm tracking-widest uppercase" style={{ color: '#DC2626' }}>
               Antifraude
             </span>
-            <span className="text-xs font-medium" style={{ color: '#6B7280' }}>
+            <span className="hidden sm:block text-xs font-medium" style={{ color: '#6B7280' }}>
               Mesa de Crédito
             </span>
           </div>
@@ -92,7 +91,7 @@ export default function Header() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" />
             </svg>
           )}
-          <span className="hidden sm:inline">{tema === 'dark' ? 'Modo Claro' : 'Modo Escuro'}</span>
+          <span className="hidden md:inline">{tema === 'dark' ? 'Modo Claro' : 'Modo Escuro'}</span>
         </button>
 
         {/* Divider */}

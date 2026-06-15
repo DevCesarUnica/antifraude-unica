@@ -88,7 +88,7 @@ export default function UsersPage() {
   return (
     <div className="flex flex-col gap-6">
       {/* Cabeçalho da página */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-black uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>
             Gestão de Usuários
@@ -118,7 +118,8 @@ export default function UsersPage() {
         className="rounded-xl overflow-hidden"
         style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-mid)' }}
       >
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm" style={{ minWidth: '600px' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--bg-mid)' }}>
               {['Nome', 'Usuário', 'Email', 'Perfil', 'Status', isAdmin ? 'Ações' : ''].filter(Boolean).map((h) => (
@@ -235,6 +236,7 @@ export default function UsersPage() {
           </tbody>
         </table>
 
+        </div>
         {users.length === 0 && (
           <div className="py-16 text-center" style={{ color: 'var(--text-muted)' }}>
             <p className="text-sm">Nenhum usuário encontrado.</p>

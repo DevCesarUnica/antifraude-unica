@@ -112,7 +112,7 @@ export default function ProposalsTable() {
     >
       {/* Cabeçalho da tabela */}
       <div
-        className="flex items-center justify-between px-5 py-4"
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-5 py-3 sm:py-4"
         style={{ backgroundColor: 'var(--bg-mid)', borderBottom: '1px solid var(--border)' }}
       >
         <div className="flex items-center gap-3">

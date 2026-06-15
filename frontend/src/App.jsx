@@ -34,7 +34,7 @@ export default function App() {
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <Header />
-      <main className="p-6">
+      <main className="p-3 sm:p-6">
         {renderPage()}
       </main>
     </div>

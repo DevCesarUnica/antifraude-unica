@@ -2,10 +2,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Banco
-    database_url: str = "postgresql://unica:unica123@localhost:5432/antifraude"
+    # Banco — SQLite por padrão no dev local; troque por postgresql:// em produção
+    database_url: str = "sqlite:///./antifraude_v2.db"
 
-    # Redis / Celery
+    # Redis / Celery — não usado no modo dev local
     redis_url: str = "redis://localhost:6379/0"
 
     # Titan API
@@ -17,7 +17,8 @@ class Settings(BaseSettings):
 
     # Segurança
     secret_key: str = "mude-em-producao"
-    algorithm: str = "HS256"
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_hours: int = 8
     access_token_expire_minutes: int = 60
 
     # Circuit Breaker

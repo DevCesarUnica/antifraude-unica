@@ -16,7 +16,46 @@ from app.schemas import (
     PropostaCreate, PropostaOut, PropostaSummary, AuditoriaOut, Mensagem
 )
 from app.services.auditoria import AuditoriaService
-from app.workers.tasks import processar_proposta
+
+# Modo dev: processa de forma síncrona (sem Celery/Redis).
+# Em produção com Docker, substitui por: from app.workers.tasks import processar_proposta
+def _processar_sync(proposta_id: str):
+    """Processa a proposta de forma síncrona (dev sem Celery)."""
+    from app.database import SessionLocal
+    from app.services.antifraude import MotorAntifraude, ResultadoMotor
+    from app.models import StatusProposta, TipoEvento
+    db2 = SessionLocal()
+    try:
+        p = db2.query(Proposta).filter(Proposta.id == proposta_id).first()
+        if not p:
+            return
+        audit = AuditoriaService(db2)
+        p.status = StatusProposta.EM_ANALISE
+        audit.registrar(proposta_id, TipoEvento.INICIO_ANALISE)
+
+        decisao = MotorAntifraude(db2).avaliar(p)
+        p.score_fraude = decisao.score
+        p.resultado_motor = decisao.resultado
+        p.decisao_detalhes = {
+            "resultado": decisao.resultado,
+            "score": decisao.score,
+            "motivo_principal": decisao.motivo_principal,
+            "flags": decisao.flags,
+        }
+        audit.registrar(proposta_id, TipoEvento.DECISAO_MOTOR, dados=p.decisao_detalhes)
+
+        if decisao.resultado == ResultadoMotor.BLOQUEADO:
+            p.status = StatusProposta.BLOQUEADA
+        elif decisao.resultado == ResultadoMotor.MANUAL:
+            p.status = StatusProposta.ANALISE_MANUAL
+        else:
+            p.status = StatusProposta.APROVADA
+
+        db2.commit()
+    finally:
+        db2.close()
+
+processar_proposta = type("Task", (), {"apply_async": staticmethod(lambda args, **kw: _processar_sync(args[0]))})()
 
 router = APIRouter(prefix="/propostas", tags=["propostas"])
 

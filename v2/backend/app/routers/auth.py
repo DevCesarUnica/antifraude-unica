@@ -15,7 +15,7 @@ from app.schemas import LoginRequest, TokenResponse, UsuarioCreate, UsuarioOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_ctx = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 bearer = HTTPBearer()
 
 # Modelo simplificado de usuário (sem tabela separada para não complicar o MVP v2)

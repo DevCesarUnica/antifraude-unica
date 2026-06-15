@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.core.logging import configure_logging
+from app.core.logging import configurar_logs as configure_logging
 from app.database import engine, Base
 from app.routers import propostas, regras, titan, auth
 

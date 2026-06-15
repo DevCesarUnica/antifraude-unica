@@ -10,10 +10,16 @@ from enum import Enum as PyEnum
 from sqlalchemy import (
     Boolean, DateTime, Float, ForeignKey,
     Integer, String, Text, Enum, UniqueConstraint,
-    Index,
+    Index, JSON,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship, mapped_column, Mapped
+
+# Usa JSONB com PostgreSQL, JSON genérico com outros bancos (SQLite no dev)
+from app.core.config import settings as _settings
+if _settings.database_url.startswith("postgresql"):
+    from sqlalchemy.dialects.postgresql import JSONB
+else:
+    JSONB = JSON
 from app.database import Base
 
 

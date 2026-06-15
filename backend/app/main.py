@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine
 from app import models
-from app.routers import propostas, corretores, grupos, regras, convenios, blacklist, auth
+from app.routers import propostas, corretores, grupos, regras, convenios, blacklist, auth, users
 from app.routers.auth import get_current_user
 
 # Cria todas as tabelas no banco ao iniciar
@@ -31,6 +31,7 @@ app.include_router(grupos.router, prefix="/grupos", tags=["Grupos"], dependencie
 app.include_router(regras.router, prefix="/regras", tags=["Regras"], dependencies=_auth_dep)
 app.include_router(convenios.router, prefix="/convenios", tags=["Convenios"], dependencies=_auth_dep)
 app.include_router(blacklist.router, prefix="/blacklist", tags=["Blacklist"], dependencies=_auth_dep)
+app.include_router(users.router, prefix="/users", tags=["Usuários"])
 
 
 @app.get("/", tags=["Root"])

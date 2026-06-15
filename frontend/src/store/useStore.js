@@ -5,6 +5,10 @@ import {
   atualizarStatus as apiAtualizarStatus,
   loginApi,
   logoutApi,
+  getUsers,
+  createUserApi,
+  updateUserApi,
+  toggleUserApi,
 } from '../services/api'
 
 const TOKEN_KEY = 'antifraude_token'
@@ -26,8 +30,8 @@ const useStore = create((set, get) => ({
 
   login: async (username, password) => {
     const response = await loginApi(username, password)
-    const { access_token, username: uname, nome, cargo } = response.data
-    const user = { username: uname, nome, cargo }
+    const { access_token, username: uname, nome, cargo, role } = response.data
+    const user = { username: uname, nome, cargo, role }
     localStorage.setItem(TOKEN_KEY, access_token)
     localStorage.setItem(USER_KEY, JSON.stringify(user))
     set({ token: access_token, user, isAuthenticated: true })
@@ -37,7 +41,41 @@ const useStore = create((set, get) => ({
     try { await logoutApi() } catch {}
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USER_KEY)
-    set({ token: null, user: null, isAuthenticated: false, propostas: [], summary: [] })
+    set({ token: null, user: null, isAuthenticated: false, propostas: [], summary: [], currentPage: 'dashboard' })
+  },
+
+  // ── Navegação ─────────────────────────────────────────────────────────────
+  currentPage: 'dashboard',
+  navigateTo: (page) => set({ currentPage: page }),
+
+  // ── Usuários ──────────────────────────────────────────────────────────────
+  users: [],
+
+  fetchUsers: async () => {
+    try {
+      const response = await getUsers()
+      set({ users: response.data })
+    } catch (err) {
+      console.error('[Store] fetchUsers error:', err)
+    }
+  },
+
+  createUser: async (data) => {
+    await createUserApi(data)
+    const response = await getUsers()
+    set({ users: response.data })
+  },
+
+  updateUser: async (id, data) => {
+    await updateUserApi(id, data)
+    const response = await getUsers()
+    set({ users: response.data })
+  },
+
+  toggleUser: async (id) => {
+    await toggleUserApi(id)
+    const response = await getUsers()
+    set({ users: response.data })
   },
 
   // ── Propostas ─────────────────────────────────────────────────────────────

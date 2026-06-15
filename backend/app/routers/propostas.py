@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.routers.auth import get_current_user
 from app.services.regras import processar_proposta
 
 router = APIRouter()
@@ -61,9 +62,13 @@ def importar_proposta(proposta_in: schemas.PropostaCreate, db: Session = Depends
 def atualizar_status(
     proposta_id: int,
     update: schemas.PropostaStatusUpdate,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Atualiza o status de uma proposta manualmente."""
+    if update.status in {"APROVADA", "REPROVADA"} and current_user.role == "OPERADOR":
+        raise HTTPException(status_code=403, detail="Operadores não podem aprovar ou reprovar propostas")
+
     proposta = db.query(models.Proposta).filter(models.Proposta.id == proposta_id).first()
     if not proposta:
         raise HTTPException(status_code=404, detail="Proposta nao encontrada")

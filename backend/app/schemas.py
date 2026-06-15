@@ -148,16 +148,35 @@ class LoginResponse(BaseModel):
     username: str
     nome: str
     cargo: str
+    role: str
 
 
 class UserResponse(BaseModel):
     id: int
     username: str
+    email: Optional[str] = None
     nome: str
     cargo: str
+    role: str
     ativo: bool
 
     model_config = {"from_attributes": True}
+
+
+class UserCreate(BaseModel):
+    username: str
+    email: Optional[str] = None
+    password: str
+    nome: str
+    role: str = "OPERADOR"
+
+
+class UserUpdate(BaseModel):
+    nome: Optional[str] = None
+    email: Optional[str] = None
+    cargo: Optional[str] = None
+    role: Optional[str] = None
+    password: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

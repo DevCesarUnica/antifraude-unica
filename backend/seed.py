@@ -7,12 +7,27 @@ Uso: python seed.py  (a partir da pasta backend/)
 
 import hashlib
 import os
+import sqlite3
 import sys
 from datetime import datetime, timedelta
 import random
 
 # Resolve imports do pacote app a partir da pasta backend/
 sys.path.insert(0, os.path.dirname(__file__))
+
+# Migração: adiciona colunas email e role se não existirem
+_db_path = os.path.join(os.path.dirname(__file__), "antifraude.db")
+if os.path.exists(_db_path):
+    _conn = sqlite3.connect(_db_path)
+    _cur = _conn.cursor()
+    _cols = [r[1] for r in _cur.execute("PRAGMA table_info(users)").fetchall()]
+    if "email" not in _cols:
+        _cur.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        _cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users(email)")
+    if "role" not in _cols:
+        _cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'OPERADOR'")
+    _conn.commit()
+    _conn.close()
 
 from app.database import SessionLocal, engine
 from app import models
@@ -109,17 +124,24 @@ def criar_proposta(
     return p
 
 
-def get_or_create_user(username: str, password: str, nome: str, cargo: str) -> models.User:
+def get_or_create_user(username: str, password: str, nome: str, cargo: str, role: str, email: str = None) -> models.User:
     obj = db.query(models.User).filter(models.User.username == username).first()
     if not obj:
         obj = models.User(
             username=username,
+            email=email,
             password_hash=hashlib.sha256(password.encode("utf-8")).hexdigest(),
             nome=nome,
             cargo=cargo,
+            role=role,
         )
         db.add(obj)
         db.flush()
+    else:
+        obj.role = role
+        obj.cargo = cargo
+        if email and not obj.email:
+            obj.email = email
     return obj
 
 
@@ -127,11 +149,11 @@ def get_or_create_user(username: str, password: str, nome: str, cargo: str) -> m
 # Usuários
 # ---------------------------------------------------------------------------
 print("Inserindo usuários...")
-get_or_create_user("admin",  "admin123",  "Administrador",  "Administrador")
-get_or_create_user("cesar",  "cesar123",  "César Barros",   "Gestor")
-get_or_create_user("leo",    "leo123",    "Leonardo Silva", "Analista")
-get_or_create_user("julia",  "julia123",  "Julia Santos",   "Analista")
-get_or_create_user("sergio", "sergio123", "Sergio Oliveira","Operador")
+get_or_create_user("admin",  "admin123",  "Administrador",  "Administrador", "ADMIN",     "admin@unicapromotora.com.br")
+get_or_create_user("cesar",  "cesar123",  "César Barros",   "Gestor",        "GESTOR",    "cesar@unicapromotora.com.br")
+get_or_create_user("leo",    "leo123",    "Leonardo Silva", "Analista",      "ANALISTA",  "leo@unicapromotora.com.br")
+get_or_create_user("julia",  "julia123",  "Julia Santos",   "Analista",      "ANALISTA",  "julia@unicapromotora.com.br")
+get_or_create_user("sergio", "sergio123", "Sergio Oliveira","Operador",      "OPERADOR",  "sergio@unicapromotora.com.br")
 db.commit()
 
 # ---------------------------------------------------------------------------

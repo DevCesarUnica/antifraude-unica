@@ -10,9 +10,11 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, nullable=False)
+    email = Column(String, unique=True, nullable=True, index=True)
     password_hash = Column(String, nullable=False)
     nome = Column(String, nullable=False)
     cargo = Column(String, default="Operador", nullable=False)
+    role = Column(String, default="OPERADOR", nullable=False)
     token = Column(String, nullable=True, unique=True)
     ativo = Column(Boolean, default=True, nullable=False)
 

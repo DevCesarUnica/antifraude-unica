@@ -1,0 +1,248 @@
+================================================================================
+  ANTIFRAUDE UNICA PROMOTORA — GUIA DE INSTALAÇÃO E CONFIGURAÇÃO
+  Como clonar e rodar o projeto do zero no VS Code
+================================================================================
+
+
+================================================================================
+  PRÉ-REQUISITOS
+================================================================================
+
+Antes de qualquer coisa, verificar se os programas abaixo estão instalados.
+Abrir o Terminal do VS Code (Ctrl + ') e testar cada comando:
+
+    git --version        → Deve aparecer: git version 2.x
+    python --version     → Deve aparecer: Python 3.10 ou superior
+    node --version       → Deve aparecer: v18 ou superior
+    npm --version        → Deve aparecer: 9 ou superior
+
+Se algum não funcionar, instalar:
+
+  - Git:          https://git-scm.com/download/win
+  - Python 3.11:  https://www.python.org/downloads/
+                  IMPORTANTE: marcar "Add Python to PATH" durante a instalação
+  - Node.js 20:   https://nodejs.org/  (baixar a versão LTS)
+
+Após instalar, fechar e reabrir o VS Code antes de continuar.
+
+
+================================================================================
+  PASSO 1 — CLONAR O REPOSITÓRIO
+================================================================================
+
+Opção A (pelo VS Code):
+  1. Pressionar Ctrl + Shift + P
+  2. Digitar: Git: Clone
+  3. Colar a URL: https://github.com/DevCesarUnica/antifraude-unica.git
+  4. Escolher uma pasta para salvar (ex: Documentos)
+  5. Aguardar o download. Quando perguntar "Abrir pasta?" — clicar em Open
+
+Opção B (pelo terminal):
+  Abrir o terminal na pasta desejada e digitar:
+
+    git clone https://github.com/DevCesarUnica/antifraude-unica.git
+    cd antifraude-unica
+
+Em seguida abrir a pasta no VS Code:
+  Arquivo > Abrir Pasta > selecionar a pasta antifraude-unica
+
+
+================================================================================
+  PASSO 2 — CRIAR AMBIENTE VIRTUAL PYTHON
+================================================================================
+
+No terminal do VS Code (Ctrl + '), digitar:
+
+    cd backend
+    python -m venv venv
+
+Ativar o ambiente virtual:
+
+  No Windows:
+    venv\Scripts\activate
+
+  No Mac/Linux:
+    source venv/bin/activate
+
+O terminal vai mostrar (venv) no início da linha — isso confirma que está ativo.
+
+  IMPORTANTE: Toda vez que abrir o projeto de novo, será necessário ativar
+  o venv antes de rodar qualquer comando Python. Sem o (venv) ativo, os
+  comandos podem falhar com erro de importação.
+
+
+================================================================================
+  PASSO 3 — INSTALAR DEPENDÊNCIAS DO BACKEND
+================================================================================
+
+Com o (venv) ativo e dentro da pasta backend, rodar:
+
+    pip install -r requirements.txt
+
+Aguardar instalar tudo. No final deve aparecer "Successfully installed..."
+
+Se aparecer erro de permissão no Windows, tentar:
+
+    pip install -r requirements.txt --user
+
+
+================================================================================
+  PASSO 4 — POPULAR O BANCO DE DADOS
+================================================================================
+
+Ainda dentro da pasta backend, com o (venv) ativo:
+
+    python seed.py
+
+O script vai criar o banco de dados e inserir todos os dados iniciais.
+Deve aparecer no final:
+
+    Inserindo usuários...
+    Inserindo grupos...
+    Inserindo corretores...
+    Inserindo convenios...
+    Inserindo blacklist...
+    Inserindo propostas...
+    Seed concluido com sucesso!
+
+  ATENÇÃO: Se aparecer algum erro aqui, NÃO continuar os próximos passos.
+  O sistema não vai funcionar sem o banco populado corretamente.
+
+
+================================================================================
+  PASSO 5 — INICIAR O BACKEND
+================================================================================
+
+Com o (venv) ativo e dentro da pasta backend:
+
+    python -m uvicorn app.main:app --reload --port 8000
+
+Aguardar aparecer:
+
+    INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+    INFO:     Application startup complete.
+
+  IMPORTANTE: Deixar esse terminal aberto. Não fechar enquanto usar o sistema.
+  Para parar o servidor quando terminar: pressionar Ctrl + C
+
+
+================================================================================
+  PASSO 6 — INSTALAR E INICIAR O FRONTEND
+================================================================================
+
+Abrir um SEGUNDO terminal no VS Code (clicar no + na barra de terminais).
+No novo terminal:
+
+    cd frontend
+    npm install
+
+Aguardar instalar (pode demorar alguns minutos na primeira vez).
+Em seguida:
+
+    npm run dev
+
+Aguardar aparecer:
+
+    VITE v5.x.x  ready in xxx ms
+    ➜  Local:   http://localhost:5173/
+
+  IMPORTANTE: Deixar esse terminal aberto também.
+  Para parar quando terminar: pressionar Ctrl + C
+
+
+================================================================================
+  PASSO 7 — ACESSAR O SISTEMA
+================================================================================
+
+Abrir o navegador e acessar:  http://localhost:5173
+
+Usuários disponíveis para login:
+
+    Usuário   | Senha       | Perfil
+    ----------+-------------+------------------
+    admin     | admin123    | Administrador (acesso total)
+    cesar     | cesar123    | Gestor
+    leo       | leo123      | Analista
+    julia     | julia123    | Analista
+    sergio    | sergio123   | Operador
+
+  Permissões por perfil:
+    - ADMIN:    cria/edita usuários, aprova/reprova propostas, tudo
+    - GESTOR:   vê usuários, aprova/reprova propostas
+    - ANALISTA: aprova/reprova propostas
+    - OPERADOR: apenas visualiza e altera status de propostas
+
+
+================================================================================
+  EXTENSÕES RECOMENDADAS DO VS CODE
+================================================================================
+
+Instalar pelo menu de extensões (Ctrl + Shift + X):
+
+  - Python                              (da Microsoft) — obrigatória
+  - Pylance                             — autocomplete Python avançado
+  - ES7+ React/Redux/React-Native snippets — atalhos para React
+  - Prettier - Code formatter           — formatação automática
+  - GitLens                             — visualizar histórico Git
+
+
+================================================================================
+  PROBLEMAS COMUNS E SOLUÇÕES
+================================================================================
+
+PROBLEMA: "python não é reconhecido como comando interno"
+SOLUÇÃO:  Reinstalar Python em https://www.python.org/downloads/
+          Marcar a opção "Add Python to PATH" durante a instalação
+          Reiniciar o VS Code após instalar
+
+PROBLEMA: "npm não é reconhecido como comando interno"
+SOLUÇÃO:  Reinstalar Node.js em https://nodejs.org/
+          Reiniciar o VS Code após instalar
+
+PROBLEMA: Seed.py falhou com erro de importação (ModuleNotFoundError)
+SOLUÇÃO:  Verificar se rodou venv\Scripts\activate antes do pip install
+          Verificar se está dentro da pasta backend ao rodar o seed
+
+PROBLEMA: Backend inicia mas o login não funciona
+SOLUÇÃO:  Verificar se o seed terminou com "Seed concluido com sucesso!"
+          Se não terminou, rodar python seed.py novamente
+
+PROBLEMA: "Porta 8000 já está em uso"
+SOLUÇÃO:  Outro programa está usando essa porta
+          Fechar outros servidores ou reiniciar o computador
+
+PROBLEMA: "Porta 5173 já está em uso"
+SOLUÇÃO:  Fechar outras instâncias do frontend
+          Ou rodar: npm run dev -- --port 5174
+
+PROBLEMA: Sistema abre mas não carrega dados (tela em branco)
+SOLUÇÃO:  Verificar se o backend está rodando na porta 8000
+          Verificar se aparece o texto "Uvicorn running" no terminal do backend
+
+PROBLEMA: Após git pull o sistema parou de funcionar
+SOLUÇÃO:  Parar o backend (Ctrl+C) e reiniciar
+          Se houve mudanças no banco: rodar python seed.py novamente
+          Se houve novos pacotes: rodar pip install -r requirements.txt
+
+
+================================================================================
+  ESTRUTURA DOS TERMINAIS (RESUMO)
+================================================================================
+
+Para o sistema funcionar, precisam estar abertos simultaneamente:
+
+  Terminal 1 — Backend:
+    cd backend
+    venv\Scripts\activate
+    python -m uvicorn app.main:app --reload --port 8000
+
+  Terminal 2 — Frontend:
+    cd frontend
+    npm run dev
+
+Acessar em: http://localhost:5173
+
+
+================================================================================
+  Unica Promotora — Sistema Antifraude | Mesa de Crédito
+================================================================================

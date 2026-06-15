@@ -1,0 +1,99 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-unica}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-unica123}
+      POSTGRES_DB: ${POSTGRES_DB:-antifraude}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-unica}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-unica}:${POSTGRES_PASSWORD:-unica123}@postgres:5432/${POSTGRES_DB:-antifraude}
+      - REDIS_URL=redis://redis:6379/0
+      - TITAN_BASE_URL=${TITAN_BASE_URL:-https://hope.titan.ceoslab.app/api}
+      - TITAN_API_KEY=${TITAN_API_KEY:-123}
+      - SECRET_KEY=${SECRET_KEY:-changeme-in-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-unica}:${POSTGRES_PASSWORD:-unica123}@postgres:5432/${POSTGRES_DB:-antifraude}
+      - REDIS_URL=redis://redis:6379/0
+      - TITAN_BASE_URL=${TITAN_BASE_URL:-https://hope.titan.ceoslab.app/api}
+      - TITAN_API_KEY=${TITAN_API_KEY:-123}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: celery -A app.workers.celery_app worker --loglevel=info -Q propostas,propostas.dlq --concurrency=4
+
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - worker
+    command: celery -A app.workers.celery_app flower --port=5555
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend/src:/app/src
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -35,16 +35,16 @@ export const logoutApi = ()                   => api.post('/auth/logout')
 export const meApi     = ()                   => api.get('/auth/me')
 
 // ── Propostas ─────────────────────────────────────────────────────────────────
-export const getPropostas     = (status)          => api.get('/propostas', { params: status ? { status } : {} })
+export const getPropostas     = (status)          => api.get('/propostas/', { params: status ? { status } : {} })
 export const importarProposta = (data)            => api.post('/propostas/importar', data)
 export const atualizarStatus  = (id, status, obs) => api.put(`/propostas/${id}/status`, { status, ...(obs && { observacao: obs }) })
 export const getSummary       = ()                => api.get('/propostas/summary')
 
 // ── Outros ────────────────────────────────────────────────────────────────────
-export const getCorretores = () => api.get('/corretores')
-export const getGrupos     = () => api.get('/grupos')
-export const getConvenios  = () => api.get('/convenios')
-export const getBlacklist  = () => api.get('/blacklist')
+export const getCorretores = () => api.get('/corretores/')
+export const getGrupos     = () => api.get('/grupos/')
+export const getConvenios  = () => api.get('/convenios/')
+export const getBlacklist  = () => api.get('/blacklist/')
 
 // ── Usuários ──────────────────────────────────────────────────────────────────
 export const getUsers      = ()         => api.get('/users/')

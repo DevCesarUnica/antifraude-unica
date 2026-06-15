@@ -13,6 +13,7 @@ app = FastAPI(
     title="Antifraude Unica Promotora",
     description="Sistema de mesa de credito com engine de regras antifraude",
     version="1.0.0",
+    redirect_slashes=False,
 )
 
 app.add_middleware(

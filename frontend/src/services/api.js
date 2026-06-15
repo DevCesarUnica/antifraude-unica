@@ -47,8 +47,8 @@ export const getConvenios  = () => api.get('/convenios')
 export const getBlacklist  = () => api.get('/blacklist')
 
 // ── Usuários ──────────────────────────────────────────────────────────────────
-export const getUsers      = ()         => api.get('/users')
-export const createUserApi = (data)     => api.post('/users', data)
+export const getUsers      = ()         => api.get('/users/')
+export const createUserApi = (data)     => api.post('/users/', data)
 export const updateUserApi = (id, data) => api.put(`/users/${id}`, data)
 export const toggleUserApi = (id)       => api.patch(`/users/${id}/status`)
 

@@ -38,11 +38,24 @@ export default function Header() {
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
         >
           <img src={logo} alt="Unica Promotora" style={{ height: '40px', width: 'auto' }} className="flex-shrink-0" />
+
           <div className="flex flex-col leading-tight text-left">
-            <span className="font-bold text-sm tracking-widest uppercase" style={{ color: 'var(--text-primary)' }}>
-              UNICA ANTIFRAUDE
+            <span className="font-bold text-sm tracking-wide" style={{ color: 'var(--text-primary)' }}>
+              Unica Promotora
             </span>
-            <span className="text-xs" style={{ color: '#6B7280' }}>
+            <span className="text-xs font-medium" style={{ color: '#6B7280' }}>
+              Promotora de Crédito
+            </span>
+          </div>
+
+          {/* Divider */}
+          <div style={{ width: '1px', height: '32px', backgroundColor: 'var(--border)', margin: '0 4px' }} />
+
+          <div className="flex flex-col leading-tight text-left">
+            <span className="font-black text-sm tracking-widest uppercase" style={{ color: '#DC2626' }}>
+              Antifraude
+            </span>
+            <span className="text-xs font-medium" style={{ color: '#6B7280' }}>
               Mesa de Crédito
             </span>
           </div>

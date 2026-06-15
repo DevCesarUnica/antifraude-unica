@@ -7,7 +7,7 @@ from app import models, schemas
 from app.database import get_db
 from app.routers.auth import get_current_user, hash_password, require_role, _ROLE_CARGO
 
-router = APIRouter()
+router = APIRouter(redirect_slashes=False)
 
 VALID_ROLES = {"ADMIN", "GESTOR", "ANALISTA", "OPERADOR"}
 

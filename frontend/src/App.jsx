@@ -2,13 +2,18 @@ import { useEffect } from 'react'
 import useStore from './store/useStore'
 import Header from './components/Header'
 import Dashboard from './pages/Dashboard'
+import LoginPage from './pages/LoginPage'
 
 export default function App() {
-  const tema = useStore((s) => s.tema)
+  const { tema, isAuthenticated } = useStore()
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', tema)
   }, [tema])
+
+  if (!isAuthenticated) {
+    return <LoginPage />
+  }
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>

@@ -5,6 +5,7 @@ Idempotente: verifica existencia antes de inserir.
 Uso: python seed.py  (a partir da pasta backend/)
 """
 
+import hashlib
 import os
 import sys
 from datetime import datetime, timedelta
@@ -107,6 +108,31 @@ def criar_proposta(
 
     return p
 
+
+def get_or_create_user(username: str, password: str, nome: str, cargo: str) -> models.User:
+    obj = db.query(models.User).filter(models.User.username == username).first()
+    if not obj:
+        obj = models.User(
+            username=username,
+            password_hash=hashlib.sha256(password.encode("utf-8")).hexdigest(),
+            nome=nome,
+            cargo=cargo,
+        )
+        db.add(obj)
+        db.flush()
+    return obj
+
+
+# ---------------------------------------------------------------------------
+# Usuários
+# ---------------------------------------------------------------------------
+print("Inserindo usuários...")
+get_or_create_user("admin",  "admin123",  "Administrador",  "Administrador")
+get_or_create_user("cesar",  "cesar123",  "César Barros",   "Gestor")
+get_or_create_user("leo",    "leo123",    "Leonardo Silva", "Analista")
+get_or_create_user("julia",  "julia123",  "Julia Santos",   "Analista")
+get_or_create_user("sergio", "sergio123", "Sergio Oliveira","Operador")
+db.commit()
 
 # ---------------------------------------------------------------------------
 # Grupos

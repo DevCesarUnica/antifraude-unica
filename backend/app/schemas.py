@@ -135,6 +135,32 @@ class PropostaStatusUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    username: str
+    nome: str
+    cargo: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    nome: str
+    cargo: str
+    ativo: bool
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

@@ -2,7 +2,7 @@ import logo from '../logo.png'
 import useStore from '../store/useStore'
 
 export default function Header() {
-  const { tema, toggleTema } = useStore()
+  const { tema, toggleTema, user, logout } = useStore()
   return (
     <header
       style={{
@@ -34,12 +34,21 @@ export default function Header() {
 
       {/* Lado direito: Badge + Botões */}
       <div className="flex items-center gap-3">
-        <span
-          style={{ backgroundColor: '#DC2626' }}
-          className="text-white text-xs font-semibold px-3 py-1 rounded-full tracking-wide uppercase"
-        >
-          Administrador
-        </span>
+        {/* Info do usuário */}
+        <div className="hidden sm:flex flex-col items-end leading-tight">
+          <span className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>
+            {user?.nome ?? 'Usuário'}
+          </span>
+          <span
+            className="text-xs font-semibold uppercase tracking-wide"
+            style={{ color: '#DC2626' }}
+          >
+            {user?.cargo ?? '—'}
+          </span>
+        </div>
+
+        {/* Divider */}
+        <div style={{ width: '1px', height: '28px', backgroundColor: 'var(--border)' }} />
 
         {/* Botão tema */}
         <button
@@ -117,6 +126,21 @@ export default function Header() {
             />
           </svg>
           <span className="hidden sm:inline">Personalização</span>
+        </button>
+
+        {/* Logout */}
+        <button
+          onClick={logout}
+          title="Sair"
+          className="flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg transition-all duration-150 focus:outline-none"
+          style={{ backgroundColor: 'rgba(220,38,38,0.12)', color: '#DC2626', border: '1px solid rgba(220,38,38,0.25)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#DC2626'; e.currentTarget.style.color = '#fff' }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(220,38,38,0.12)'; e.currentTarget.style.color = '#DC2626' }}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          <span className="hidden sm:inline">Sair</span>
         </button>
       </div>
     </header>

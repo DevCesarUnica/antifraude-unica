@@ -1,9 +1,10 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine
 from app import models
-from app.routers import propostas, corretores, grupos, regras, convenios, blacklist
+from app.routers import propostas, corretores, grupos, regras, convenios, blacklist, auth
+from app.routers.auth import get_current_user
 
 # Cria todas as tabelas no banco ao iniciar
 models.Base.metadata.create_all(bind=engine)
@@ -22,12 +23,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(propostas.router, prefix="/propostas", tags=["Propostas"])
-app.include_router(corretores.router, prefix="/corretores", tags=["Corretores"])
-app.include_router(grupos.router, prefix="/grupos", tags=["Grupos"])
-app.include_router(regras.router, prefix="/regras", tags=["Regras"])
-app.include_router(convenios.router, prefix="/convenios", tags=["Convenios"])
-app.include_router(blacklist.router, prefix="/blacklist", tags=["Blacklist"])
+app.include_router(auth.router, prefix="/auth", tags=["Autenticação"])
+_auth_dep = [Depends(get_current_user)]
+app.include_router(propostas.router, prefix="/propostas", tags=["Propostas"], dependencies=_auth_dep)
+app.include_router(corretores.router, prefix="/corretores", tags=["Corretores"], dependencies=_auth_dep)
+app.include_router(grupos.router, prefix="/grupos", tags=["Grupos"], dependencies=_auth_dep)
+app.include_router(regras.router, prefix="/regras", tags=["Regras"], dependencies=_auth_dep)
+app.include_router(convenios.router, prefix="/convenios", tags=["Convenios"], dependencies=_auth_dep)
+app.include_router(blacklist.router, prefix="/blacklist", tags=["Blacklist"], dependencies=_auth_dep)
 
 
 @app.get("/", tags=["Root"])

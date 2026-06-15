@@ -5,6 +5,18 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    nome = Column(String, nullable=False)
+    cargo = Column(String, default="Operador", nullable=False)
+    token = Column(String, nullable=True, unique=True)
+    ativo = Column(Boolean, default=True, nullable=False)
+
+
 class Grupo(Base):
     __tablename__ = "grupos"
 

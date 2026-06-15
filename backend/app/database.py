@@ -1,11 +1,11 @@
-import os
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "antifraude.db")
-DATABASE_URL = f"sqlite:///{os.path.normpath(_DB_PATH)}"
+_DB_PATH = Path(__file__).resolve().parent.parent / "antifraude.db"
+DATABASE_URL = f"sqlite:///{_DB_PATH.as_posix()}"
 
 engine = create_engine(
     DATABASE_URL,

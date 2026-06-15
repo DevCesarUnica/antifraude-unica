@@ -1,0 +1,1061 @@
+================================================================================
+  SISTEMA ANTIFRAUDE - UNICA PROMOTORA
+  DOCUMENTAÇÃO TÉCNICA COMPLETA
+================================================================================
+  Última atualização: 15/06/2026
+  Versão do sistema : MVP 1.2 (com hierarquia de usuários)
+  Repositório       : https://github.com/DevCesarUnica/antifraude-unica
+================================================================================
+
+
+================================================================================
+  ÍNDICE
+================================================================================
+
+  1. VISÃO GERAL DO SISTEMA
+  2. ESTRUTURA DE PASTAS
+  3. TECNOLOGIAS UTILIZADAS
+  4. BACKEND — DETALHAMENTO COMPLETO
+     4.1  database.py         — Conexão com o banco de dados
+     4.2  models.py           — Modelos (tabelas do banco)
+     4.3  schemas.py          — Schemas de validação (entrada e saída de dados)
+     4.4  main.py             — Ponto de entrada da API
+     4.5  routers/auth.py     — Autenticação (login, logout, perfil)
+     4.6  routers/propostas.py— CRUD e engine de status das propostas
+     4.7  routers/corretores.py— Cadastro e gestão de corretores
+     4.8  routers/grupos.py   — Cadastro de grupos de corretores
+     4.9  routers/convenios.py— Cadastro de convênios
+     4.10 routers/blacklist.py— Lista negra de CPFs
+     4.11 routers/regras.py   — Regras por grupo
+     4.12 services/regras.py  — Engine de regras antifraude
+     4.13 seed.py             — Populador do banco de dados
+  5. FRONTEND — DETALHAMENTO COMPLETO
+     5.1  App.jsx             — Raiz da aplicação / gate de autenticação
+     5.2  pages/LoginPage.jsx — Tela de login
+     5.3  pages/Dashboard.jsx — Painel principal
+     5.4  components/Header.jsx — Cabeçalho com info do usuário e logout
+     5.5  store/useStore.js   — Estado global (Zustand)
+     5.6  services/api.js     — Camada de comunicação com o backend
+  6. BANCO DE DADOS — TABELAS E RELACIONAMENTOS
+  7. FLUXO DE AUTENTICAÇÃO
+  8. ENGINE DE REGRAS ANTIFRAUDE — FLUXO COMPLETO
+  9. STATUS DE PROPOSTAS — TODOS OS ESTADOS POSSÍVEIS
+  10. USUÁRIOS DO SISTEMA (SEED)
+  11. COMO RODAR O PROJETO
+  12. ENDPOINTS DA API — REFERÊNCIA COMPLETA
+  13. HISTÓRICO DE VERSÕES
+
+
+================================================================================
+  1. VISÃO GERAL DO SISTEMA
+================================================================================
+
+O Sistema Antifraude da Unica Promotora é uma aplicação web interna usada pela
+"Mesa de Crédito" para gerenciar, analisar e aprovar/reprovar propostas de
+crédito consignado. O sistema aplica automaticamente regras de negócio para
+classificar propostas assim que são cadastradas, eliminando trabalho manual de
+triagem.
+
+PROBLEMA QUE RESOLVE:
+  - Propostas de crédito chegam de múltiplos bancos e corretores.
+  - É necessário identificar rapidamente quais propostas têm risco (CPF na
+    blacklist, convênio desconhecido, valor acima do limite do grupo do corretor).
+  - A equipe precisa de uma visão centralizada de todos os status em tempo real.
+
+ARQUITETURA GERAL:
+  - Backend  : API REST em Python/FastAPI, banco SQLite local.
+  - Frontend : Interface React (Vite), comunicação via axios.
+  - Ambos rodam localmente. Não há nuvem ou servidor externo.
+
+
+================================================================================
+  2. ESTRUTURA DE PASTAS
+================================================================================
+
+antifraude/
+│
+├── backend/
+│   ├── antifraude.db              <- Banco de dados SQLite (gerado automaticamente)
+│   ├── requirements.txt           <- Dependências Python
+│   ├── seed.py                    <- Script para popular o banco com dados de teste
+│   └── app/
+│       ├── __init__.py
+│       ├── database.py            <- Configuração do SQLAlchemy
+│       ├── models.py              <- Modelos ORM (tabelas)
+│       ├── schemas.py             <- Schemas Pydantic (validação)
+│       ├── main.py                <- Inicialização da API FastAPI
+│       ├── routers/
+│       │   ├── __init__.py
+│       │   ├── auth.py            <- Endpoints de autenticação
+│       │   ├── propostas.py       <- Endpoints de propostas
+│       │   ├── corretores.py      <- Endpoints de corretores
+│       │   ├── grupos.py          <- Endpoints de grupos
+│       │   ├── convenios.py       <- Endpoints de convênios
+│       │   ├── blacklist.py       <- Endpoints da blacklist
+│       │   └── regras.py          <- Endpoints de regras por grupo
+│       └── services/
+│           ├── __init__.py
+│           └── regras.py          <- Engine de regras antifraude
+│
+├── frontend/
+│   ├── package.json
+│   ├── index.html
+│   ├── vite.config.js
+│   └── src/
+│       ├── main.jsx               <- Ponto de entrada React
+│       ├── App.jsx                <- Componente raiz / gate de auth
+│       ├── index.css              <- Variáveis CSS de tema (dark/light)
+│       ├── logo.png               <- Logo Unica Promotora
+│       ├── pages/
+│       │   ├── LoginPage.jsx      <- Tela de login
+│       │   └── Dashboard.jsx      <- Painel principal
+│       ├── components/
+│       │   ├── Header.jsx         <- Cabeçalho da aplicação
+│       │   ├── StatusCard.jsx     <- Card de resumo por status
+│       │   └── ProposalsTable.jsx <- Tabela de propostas
+│       ├── services/
+│       │   └── api.js             <- Configuração do axios e funções de API
+│       └── store/
+│           └── useStore.js        <- Estado global com Zustand
+│
+└── DOCUMENTACAO_TECNICA.txt       <- Este arquivo
+
+
+================================================================================
+  3. TECNOLOGIAS UTILIZADAS
+================================================================================
+
+BACKEND:
+  - Python 3.11+
+  - FastAPI 0.111.0     — Framework web assíncrono para criar APIs REST
+  - Uvicorn 0.30.1      — Servidor ASGI que executa o FastAPI
+  - SQLAlchemy 2.0.30   — ORM para interagir com o banco de dados via Python
+  - Pydantic 2.7.1      — Validação de dados de entrada e saída
+  - SQLite              — Banco de dados relacional em arquivo único (antifraude.db)
+  - python-multipart    — Suporte a upload de formulários multipart
+
+FRONTEND:
+  - React 18            — Biblioteca de interface de usuário
+  - Vite                — Bundler/build tool (substitui o CRA)
+  - Zustand             — Gerenciamento de estado global (leve, sem boilerplate)
+  - Axios               — Cliente HTTP para fazer chamadas à API
+  - Tailwind CSS        — Classes utilitárias CSS para estilização rápida
+
+AUTENTICAÇÃO:
+  - Estratégia simples baseada em token UUID gerado no login e salvo no banco.
+  - Token enviado em todas as requisições via header "Authorization: Bearer <token>".
+  - Token salvo no localStorage do navegador para persistir entre recarregamentos.
+  - Hashing de senha com SHA-256 (sem salt — suficiente para uso interno).
+
+
+================================================================================
+  4. BACKEND — DETALHAMENTO COMPLETO
+================================================================================
+
+--------------------------------------------------------------------------------
+  4.1  backend/app/database.py — Conexão com o banco de dados
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Configura a conexão com o SQLite e fornece a sessão de banco para
+os routers via injeção de dependência do FastAPI.
+
+LINHAS IMPORTANTES:
+  DATABASE_URL = "sqlite:///./antifraude.db"
+    -> O arquivo antifraude.db é criado na pasta backend/ na primeira execução.
+    -> O "./" é relativo ao diretório de onde o uvicorn é iniciado.
+
+  connect_args={"check_same_thread": False}
+    -> Necessário para SQLite em contexto web, pois o FastAPI usa threads.
+    -> Sem isso, o SQLite levantaria erro ao ser acessado de threads diferentes.
+
+  SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    -> autocommit=False: alterações não são salvas automaticamente; é preciso
+       chamar db.commit() explicitamente.
+    -> autoflush=False: queries não disparam flush automático antes de executar.
+
+  def get_db():
+    -> Função geradora usada como dependência nos routers.
+    -> Abre uma sessão, entrega ao router (yield), e fecha após a resposta.
+    -> O bloco "finally" garante que a sessão sempre seja fechada, mesmo com erro.
+
+
+--------------------------------------------------------------------------------
+  4.2  backend/app/models.py — Modelos (tabelas do banco)
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Define as tabelas do banco de dados usando SQLAlchemy ORM.
+Cada classe Python vira uma tabela no SQLite.
+
+TABELA: users
+  Propósito : Armazena os usuários que têm acesso ao sistema.
+  Colunas   :
+    id            INTEGER  Primary Key, auto-incremento
+    username      TEXT     Único, usado no login (ex: "admin", "cesar")
+    password_hash TEXT     SHA-256 da senha em texto puro
+    nome          TEXT     Nome completo para exibição na interface
+    cargo         TEXT     Cargo exibido no header (ex: "Gestor", "Analista")
+    token         TEXT     UUID gerado no login; NULL quando não logado
+    ativo         BOOLEAN  Se False, o usuário não consegue logar
+
+TABELA: grupos
+  Propósito : Categoriza corretores por nível de limite de crédito.
+  Colunas   :
+    id     INTEGER  Primary Key
+    nome   TEXT     Nome do grupo (único) ex: "Grupo A", "Grupo B"
+    limite FLOAT    Valor máximo em R$ que pode ser aprovado automaticamente
+
+TABELA: corretores
+  Propósito : Cadastro de corretores que submetem propostas.
+  Colunas   :
+    id       INTEGER  Primary Key
+    nome     TEXT     Nome do corretor
+    cpf      TEXT     CPF único do corretor
+    grupo_id INTEGER  FK para grupos.id (pode ser NULL se sem grupo)
+  Relações  :
+    -> grupo     : referência ao objeto Grupo (Many-to-One)
+    -> propostas : lista de propostas deste corretor (One-to-Many)
+
+TABELA: convenios
+  Propósito : Convênios reconhecidos pelo sistema (INSS, FGTS, SIAPE, etc.)
+  Colunas   :
+    id    INTEGER  Primary Key
+    nome  TEXT     Nome único do convênio
+    banco TEXT     Banco associado a este convênio
+    ativo BOOLEAN  Se o convênio está ativo
+
+TABELA: blacklist
+  Propósito : CPFs que não devem ter propostas aprovadas.
+  Colunas   :
+    id         INTEGER   Primary Key
+    cpf        TEXT      CPF único bloqueado
+    motivo     TEXT      Razão do bloqueio (ex: "Fraude confirmada")
+    criado_em  DATETIME  Data/hora em que o CPF foi adicionado à lista
+
+TABELA: regras_grupo
+  Propósito : Regras textuais associadas a um grupo (ex: documentos exigidos).
+              Ainda sem aplicação automática no código — serve como repositório
+              de regras documentadas para consulta da equipe.
+  Colunas   :
+    id        INTEGER  Primary Key
+    grupo_id  INTEGER  FK para grupos.id
+    descricao TEXT     Descrição da regra
+
+TABELA: propostas
+  Propósito : Tabela principal do sistema. Cada linha é uma proposta de crédito.
+  Colunas   :
+    id           INTEGER   Primary Key
+    cpf_cliente  TEXT      CPF do cliente que solicitou o crédito
+    banco        TEXT      Banco que originou a proposta
+    valor        FLOAT     Valor do crédito em R$
+    status       TEXT      Status atual (ver seção 9 para lista completa)
+    corretor_id  INTEGER   FK para corretores.id (pode ser NULL)
+    convenio     TEXT      Nome do convênio (texto livre, validado pela engine)
+    data         DATETIME  Data/hora de criação da proposta
+    observacao   TEXT      Observação manual adicionada pelo analista
+  Relações  :
+    -> corretor : referência ao objeto Corretor (Many-to-One)
+
+
+--------------------------------------------------------------------------------
+  4.3  backend/app/schemas.py — Schemas de validação
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Define os contratos de entrada e saída da API usando Pydantic.
+Pydantic valida automaticamente os dados recebidos e serializa as respostas.
+
+PADRÃO USADO:
+  Para cada entidade, existem 3 schemas:
+    - XxxBase   : campos comuns a criação e resposta
+    - XxxCreate : usado no body de POST (herda Base, geralmente sem mudanças)
+    - XxxResponse : retornado pela API ao cliente; inclui campos como id e datas
+
+  A config "model_config = {'from_attributes': True}" permite que o Pydantic
+  leia diretamente dos objetos SQLAlchemy (ORM mode).
+
+SCHEMAS DE AUTENTICAÇÃO:
+  LoginRequest  : { username: str, password: str }
+    -> Enviado pelo frontend no POST /auth/login
+
+  LoginResponse : { access_token: str, username: str, nome: str, cargo: str }
+    -> Retornado pela API após login bem-sucedido
+
+  UserResponse  : { id, username, nome, cargo, ativo }
+    -> Retornado pelo GET /auth/me para exibir o perfil do usuário logado
+
+SCHEMA DE SUMMARY:
+  StatusCount : { status: str, quantidade: int, valor_total: float }
+    -> Usado no endpoint GET /propostas/summary para o painel de cards
+
+
+--------------------------------------------------------------------------------
+  4.4  backend/app/main.py — Ponto de entrada da API
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Inicializa a aplicação FastAPI, registra os middlewares e inclui
+todos os routers com seus prefixos de URL.
+
+SEQUÊNCIA DE INICIALIZAÇÃO:
+  1. Importa todos os routers e a função get_current_user de auth.py
+  2. Chama models.Base.metadata.create_all(bind=engine)
+     -> Cria todas as tabelas no banco se ainda não existirem.
+     -> Seguro de chamar múltiplas vezes: não apaga dados existentes.
+  3. Cria a instância FastAPI com título e versão.
+  4. Adiciona CORSMiddleware com allow_origins=["*"]
+     -> Permite que o frontend (localhost:5173) chame o backend (localhost:8000)
+     -> Em produção, substituir "*" pelo domínio exato do frontend.
+  5. Registra o router de auth SEM proteção (é a rota de login, deve ser pública)
+  6. Registra todos os outros routers COM a dependência get_current_user
+     -> Toda requisição a /propostas/*, /corretores/*, etc. exige token válido.
+     -> Sem token, retorna HTTP 401 antes mesmo de entrar no código do router.
+
+PROTEÇÃO DOS ROUTERS:
+  _auth_dep = [Depends(get_current_user)]
+  app.include_router(propostas.router, ..., dependencies=_auth_dep)
+  -> Essa linha aplica a verificação de token a TODOS os endpoints do router,
+     sem precisar adicionar o parâmetro em cada função individualmente.
+
+
+--------------------------------------------------------------------------------
+  4.5  backend/app/routers/auth.py — Autenticação
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Gerencia login, logout e consulta de perfil do usuário logado.
+
+FUNÇÃO AUXILIAR — hash_password(password):
+  -> Recebe a senha em texto puro e retorna o SHA-256 em hexadecimal.
+  -> Usada tanto no login (para comparar) quanto no seed (para salvar).
+
+FUNÇÃO AUXILIAR — get_current_user(authorization, db):
+  -> Usada como dependência em todas as rotas protegidas.
+  -> Lê o header "Authorization" da requisição.
+  -> Verifica se começa com "Bearer ".
+  -> Extrai o token e busca no banco um User com esse token e ativo=True.
+  -> Se não encontrar: levanta HTTP 401.
+  -> Se encontrar: retorna o objeto User para o endpoint usar.
+
+ENDPOINT: POST /auth/login
+  Entrada : { username, password }
+  Processo:
+    1. Busca o usuário pelo username com ativo=True.
+    2. Compara o hash SHA-256 da senha enviada com o password_hash no banco.
+    3. Se não bater: HTTP 401 "Usuário ou senha incorretos".
+    4. Se bater: gera um novo UUID (str(uuid.uuid4())) e salva em user.token.
+    5. Faz db.commit() para persistir o token.
+  Saída   : { access_token, username, nome, cargo }
+
+  IMPORTANTE: Cada login gera um token novo. O token anterior é sobrescrito,
+  ou seja, o sistema permite apenas uma sessão ativa por usuário por vez.
+
+ENDPOINT: POST /auth/logout
+  Proteção: requer token válido (via get_current_user)
+  Processo:
+    1. Define current_user.token = None
+    2. db.commit() — invalida o token no banco.
+  Saída   : { message: "Logout realizado com sucesso" }
+
+ENDPOINT: GET /auth/me
+  Proteção: requer token válido
+  Saída   : UserResponse (id, username, nome, cargo, ativo)
+
+
+--------------------------------------------------------------------------------
+  4.6  backend/app/routers/propostas.py — Propostas
+--------------------------------------------------------------------------------
+
+FUNÇÃO: CRUD principal do sistema. Gerencia criação, listagem e atualização
+de status das propostas de crédito.
+
+ENDPOINT: GET /propostas/summary
+  Propósito : Retorna contagem e soma de valores agrupados por status.
+  Query SQL : SELECT status, COUNT(id), COALESCE(SUM(valor), 0)
+              FROM propostas GROUP BY status
+  Saída     : Lista de StatusCount [ { status, quantidade, valor_total } ]
+  Uso       : Alimenta os cards do Dashboard (ex: "ANALISAR: 8 propostas").
+
+  ATENÇÃO: Este endpoint está declarado ANTES do GET "/" para evitar que o
+  FastAPI tente interpretar "summary" como um ID de proposta.
+
+ENDPOINT: GET /propostas?status=ANALISAR
+  Propósito : Lista todas as propostas, com filtro opcional por status.
+  Parâmetro : status (query string, opcional)
+  Saída     : Lista de PropostaResponse com dados do corretor aninhados.
+
+ENDPOINT: POST /propostas/importar
+  Propósito : Cria uma nova proposta e aplica a engine de regras.
+  Entrada   : PropostaCreate { cpf_cliente, banco, valor, corretor_id,
+                               convenio, observacao }
+  Processo  :
+    1. Cria o objeto Proposta e adiciona ao banco (db.flush para gerar o id).
+    2. Chama processar_proposta(proposta, db) para calcular o status.
+    3. Define proposta.status com o resultado da engine.
+    4. db.commit() e retorna a proposta com status calculado.
+  Status HTTP: 201 Created
+  Saída      : PropostaResponse completo
+
+ENDPOINT: PUT /propostas/{proposta_id}/status
+  Propósito : Permite ao analista alterar manualmente o status de uma proposta.
+  Entrada   : PropostaStatusUpdate { status, observacao (opcional) }
+  Processo  :
+    1. Busca a proposta pelo ID; HTTP 404 se não encontrar.
+    2. Atualiza status e observacao (se fornecida).
+    3. db.commit() e retorna proposta atualizada.
+
+
+--------------------------------------------------------------------------------
+  4.7  backend/app/routers/corretores.py — Corretores
+--------------------------------------------------------------------------------
+
+ENDPOINT: GET /corretores/
+  Retorna todos os corretores com grupo aninhado.
+
+ENDPOINT: POST /corretores/
+  Cria um novo corretor.
+  Valida duplicata de CPF (HTTP 400 se já existe).
+
+ENDPOINT: PUT /corretores/{id}/grupo?grupo_id=2
+  Vincula ou altera o grupo de um corretor.
+  Valida se o corretor existe (404) e se o grupo existe (404).
+
+
+--------------------------------------------------------------------------------
+  4.8  backend/app/routers/grupos.py — Grupos
+--------------------------------------------------------------------------------
+
+ENDPOINT: GET /grupos/
+  Retorna todos os grupos com nome e limite.
+
+ENDPOINT: POST /grupos/
+  Cria um novo grupo.
+  Valida duplicata de nome (HTTP 400 se já existe).
+
+
+--------------------------------------------------------------------------------
+  4.9  backend/app/routers/convenios.py — Convênios
+--------------------------------------------------------------------------------
+
+ENDPOINT: GET /convenios/
+  Retorna todos os convênios.
+
+ENDPOINT: POST /convenios/
+  Cria um novo convênio.
+  Valida duplicata de nome.
+
+ENDPOINT: PUT /convenios/{id}
+  Atualiza todos os campos de um convênio existente.
+  Usa model_dump() + setattr para atualizar dinamicamente todos os campos.
+
+
+--------------------------------------------------------------------------------
+  4.10 backend/app/routers/blacklist.py — Blacklist
+--------------------------------------------------------------------------------
+
+ENDPOINT: GET /blacklist/
+  Retorna todos os CPFs bloqueados com motivo e data de inclusão.
+
+ENDPOINT: POST /blacklist/
+  Adiciona um CPF à blacklist.
+  Valida duplicata de CPF (HTTP 400 se já está na lista).
+
+ENDPOINT: DELETE /blacklist/{id}
+  Remove um CPF da blacklist.
+  HTTP 404 se o ID não existir.
+  HTTP 204 No Content em caso de sucesso (sem corpo na resposta).
+
+
+--------------------------------------------------------------------------------
+  4.11 backend/app/routers/regras.py — Regras por Grupo
+--------------------------------------------------------------------------------
+
+ENDPOINT: GET /regras/
+  Retorna todas as regras cadastradas para grupos.
+
+ENDPOINT: POST /regras/
+  Cria uma regra vinculada a um grupo.
+  Valida se o grupo_id existe (HTTP 404 se não existir).
+
+
+--------------------------------------------------------------------------------
+  4.12 backend/app/services/regras.py — Engine de Regras Antifraude
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Coração do sistema. Avalia cada proposta recém-criada e decide
+automaticamente qual status ela deve receber.
+
+FUNÇÃO PRINCIPAL — processar_proposta(proposta, db) -> str:
+
+  A avaliação segue uma ordem de prioridade estrita (waterfall):
+
+  REGRA 1 — CPF na Blacklist:
+    - Consulta a tabela blacklist filtrando pelo cpf_cliente da proposta.
+    - Se encontrar: retorna "PENDENTE" imediatamente (para o processamento).
+    - Razão: CPF fraudulento tem prioridade máxima, ignora tudo mais.
+
+  REGRA 2 — Convênio não cadastrado:
+    - Se a proposta tem um convênio informado, busca na tabela convenios.
+    - Se não encontrar: retorna "NAO_MAPEADA".
+    - Razão: convênio desconhecido impede a análise de limite do grupo.
+    - Proposta sem convênio (None) pula esta regra.
+
+  REGRA 3 — Corretor sem grupo:
+    - Se corretor_id é None: retorna "ANALISAR" (sem info suficiente).
+    - Busca o corretor no banco; se não achar: retorna "ANALISAR".
+    - Se o corretor não tem grupo_id: retorna "ANALISAR".
+    - Busca o grupo; se não achar: retorna "ANALISAR".
+
+  REGRA 4 — Valor dentro do limite:
+    - Se proposta.valor <= grupo.limite: retorna "APROVADA".
+    - Aprovação automática quando o corretor tem autoridade para aquele valor.
+
+  REGRA 5 — Valor acima do limite:
+    - Se nenhuma regra anterior se aplicou e chegou aqui: retorna "ANALISAR".
+    - O analista humano precisa revisar manualmente.
+
+CLASSE ABSTRATA — BancoIntegration:
+  Define a interface futura para integração com sistemas bancários externos.
+  Métodos abstratos:
+    - importar_propostas() : buscaria propostas do banco parceiro
+    - aprovar_proposta()   : enviaria aprovação ao banco parceiro
+  Ainda não implementada — placeholder para evolução futura do sistema.
+
+
+--------------------------------------------------------------------------------
+  4.13 backend/seed.py — Populador do banco
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Script executado manualmente para preencher o banco com dados
+realistas de teste. É idempotente: verifica se cada registro já existe
+antes de inserir, portanto pode ser rodado múltiplas vezes sem duplicar.
+
+USO: cd backend/ && python seed.py
+
+PROCESSO DE EXECUÇÃO:
+  1. Adiciona o diretório ao sys.path para importar o pacote "app".
+  2. Chama create_all() para garantir que as tabelas existam.
+  3. Abre uma sessão de banco.
+  4. Insere na seguinte ordem (respeitando dependências entre tabelas):
+     a) Usuários   (5 usuários com cargos diferentes)
+     b) Grupos     (4 grupos com limites crescentes: 5k, 10k, 20k, 80k)
+     c) Corretores (6 corretores vinculados a grupos)
+     d) Convênios  (6 convênios: INSS, FGTS, SIAPE, Privado, Marinha, Exército)
+     e) Blacklist  (3 CPFs bloqueados)
+     f) Propostas  (32 propostas cobrindo todos os cenários de status)
+  5. Imprime um resumo com contagem por status ao final.
+
+HELPERS DO SEED:
+  get_or_create_xxx() : busca pelo identificador único; cria apenas se não existe.
+  proposta_existe()   : verifica pela combinação (cpf, valor, banco).
+  criar_proposta()    : cria a proposta e aplica a engine (ou usa status_override
+                        para forçar um status específico sem passar pela engine).
+
+PROPOSTAS DE TESTE CRIADAS:
+  - 4 com CPF na blacklist              -> status automático: PENDENTE
+  - 3 com convênio "Desconhecido"       -> status automático: NAO_MAPEADA
+  - 6 com valor <= limite do grupo      -> status automático: APROVADA
+  - 8 com valor > limite do grupo       -> status automático: ANALISAR
+  - 3 com status_override               -> ANALISAR_DOCUMENTO (com observação)
+  - 2 com status_override               -> APROVAR (com observação)
+  - 2 com status_override               -> AGENDADA (com observação)
+  - 1 com status_override               -> PENDENCIA_REGULARIZADA
+  - 1 com status_override               -> AGUARDANDO_BANCO
+
+
+================================================================================
+  5. FRONTEND — DETALHAMENTO COMPLETO
+================================================================================
+
+--------------------------------------------------------------------------------
+  5.1  frontend/src/App.jsx — Raiz da aplicação / gate de autenticação
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Componente raiz que decide o que renderizar baseado no estado de
+autenticação.
+
+LÓGICA PRINCIPAL:
+  const { tema, isAuthenticated } = useStore()
+
+  useEffect: toda vez que o tema muda, atualiza o atributo data-theme no
+  elemento <html>, que ativa as variáveis CSS corretas (dark ou light).
+
+  if (!isAuthenticated) return <LoginPage />
+  -> Se não há token salvo no localStorage, exibe a tela de login.
+  -> Depois do login, isAuthenticated vira true e o Dashboard é renderizado.
+
+  Se autenticado: renderiza Header + Dashboard dentro de um container
+  com a cor de fundo do tema ativo.
+
+
+--------------------------------------------------------------------------------
+  5.2  frontend/src/pages/LoginPage.jsx — Tela de login
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Interface de login com validação local e feedback visual de erro.
+
+ESTADO LOCAL (useState):
+  username     : valor digitado no campo usuário
+  password     : valor digitado no campo senha
+  loading      : true enquanto aguarda resposta da API (desabilita o botão)
+  error        : mensagem de erro exibida abaixo dos campos
+  showPassword : alterna entre type="password" e type="text"
+
+FLUXO DE LOGIN:
+  1. Usuário preenche username e password e clica em "Entrar".
+  2. handleSubmit valida que os campos não estão vazios.
+  3. Chama store.login(username, password).
+  4. Se sucesso: isAuthenticated vira true -> App.jsx renderiza o Dashboard.
+  5. Se erro: captura a mensagem do backend (err.response.data.detail) ou
+     exibe "Falha ao conectar com o servidor." se não houver resposta.
+
+DESIGN:
+  - Fundo com gradiente radial vermelho sutil.
+  - Card central com faixa vermelha no topo.
+  - Logo da Unica Promotora acima do formulário.
+  - Ícones SVG inline em cada campo.
+  - Botão com estado de loading (ícone spinner animado + texto "Entrando...").
+  - Bordas dos inputs ficam vermelhas ao focar (onFocus/onBlur inline).
+
+
+--------------------------------------------------------------------------------
+  5.3  frontend/src/pages/Dashboard.jsx — Painel principal
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Exibe o painel de controle com cards de resumo por status e a
+tabela de propostas filtrável.
+
+CONFIGURAÇÃO DOS CARDS (CARD_CONFIG):
+  Array de objetos com { title, status, bgColor } para cada status possível.
+  Ao renderizar, cada card busca os dados no summaryMap (gerado a partir do
+  array summary retornado pela API).
+
+STATS RÁPIDAS (StatPill):
+  Calculadas a partir do array summary diretamente no componente:
+  - Total de Propostas : soma de todas as quantidades
+  - Valor Total        : soma de todos os valor_total
+  - Taxa de Aprovação  : (aprovadas / total) * 100, formatado com 1 decimal
+  - Aprovadas          : quantidade do status "APROVADA"
+  - Reprovadas         : quantidade do status "REPROVADA"
+
+FILTRO DE STATUS:
+  Quando o usuário clica em um StatusCard:
+    - setFiltroStatus(status) alterna o filtro (clique duplo remove o filtro).
+    - Os cards não selecionados ficam com opacidade 55%.
+    - A tabela recarrega as propostas filtradas via fetchPropostas(status).
+  Quando há filtro ativo: aparece botão "Limpar filtro" (vermelho com X).
+
+useEffect:
+  Ao montar o componente, dispara fetchSummary() e fetchPropostas() em paralelo.
+
+
+--------------------------------------------------------------------------------
+  5.4  frontend/src/components/Header.jsx — Cabeçalho
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Barra superior fixa com logo, informações do usuário logado e ações.
+
+CONTEÚDO DA ESQUERDA:
+  - Logo Unica Promotora (imagem PNG)
+  - Badge "SISTEMA ANTIFRAUDE" com cor #DC2626 (vermelho)
+
+CONTEÚDO DA DIREITA:
+  - Nome e cargo do usuário logado (vindos de useStore().user)
+  - Linha divisória vertical
+  - Botão de alternância de tema (ícone sol/lua)
+  - Botão "Personalização" (atualmente abre um modal ou painel — a ser detalhado)
+  - Botão "Sair" com ícone de logout
+    -> Fundo vermelho translúcido; ao hover vira vermelho sólido.
+    -> Chama store.logout() que invalida o token no backend e limpa o localStorage.
+
+TEMA DINÂMICO:
+  O Header usa variáveis CSS (var(--bg-card), var(--text-primary), var(--border))
+  que são definidas no index.css e trocadas quando o atributo data-theme muda.
+
+
+--------------------------------------------------------------------------------
+  5.5  frontend/src/store/useStore.js — Estado global (Zustand)
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Fonte única de verdade do frontend. Contém todo o estado da
+aplicação e as ações que modificam esse estado.
+
+INICIALIZAÇÃO DE AUTH (loadAuth):
+  Executada uma única vez ao carregar o módulo.
+  Lê localStorage.getItem("antifraude_token") e "antifraude_user".
+  Se existir token: isAuthenticated=true, e o usuário vai direto ao Dashboard
+  sem precisar logar novamente (sessão persistida entre abas e recarregamentos).
+
+ESTADO ARMAZENADO:
+  token           : string UUID do token ativo (ou null)
+  user            : { username, nome, cargo } do usuário logado
+  isAuthenticated : boolean derivado de !!token
+  propostas       : array com as propostas carregadas da API
+  summary         : array com contagens por status para os cards
+  filtroStatus    : status selecionado no momento (null = sem filtro)
+  loading         : boolean de carregamento das propostas
+  error           : mensagem de erro (se houver)
+  tema            : "dark" | "light"
+
+AÇÕES:
+  login(username, password):
+    -> Chama loginApi e recebe { access_token, username, nome, cargo }.
+    -> Salva token e user no localStorage E no estado Zustand.
+    -> Atualiza isAuthenticated=true, que dispara re-render em App.jsx.
+
+  logout():
+    -> Tenta chamar logoutApi() (ignora erros de rede com try/catch).
+    -> Remove token e user do localStorage.
+    -> Reseta o estado para valores vazios/nulos.
+
+  toggleTema():
+    -> Alterna tema entre "dark" e "light".
+
+  fetchPropostas(status):
+    -> Define loading=true.
+    -> Chama getPropostas(status) da camada de API.
+    -> Normaliza a resposta (Array.isArray / data.items / data.propostas).
+    -> Define loading=false e atualiza propostas no estado.
+
+  fetchSummary():
+    -> Chama getSummary() e atualiza summary no estado.
+
+  setFiltroStatus(status):
+    -> Se o status clicado é o mesmo que o atual: remove o filtro (null).
+    -> Caso contrário: define o novo filtro.
+    -> Chama fetchPropostas com o novo valor (ou null para todas).
+
+  atualizarStatus(id, status, obs):
+    -> Chama apiAtualizarStatus(id, status, obs).
+    -> Após sucesso: recarrega propostas (respeitando filtro atual) e summary.
+
+
+--------------------------------------------------------------------------------
+  5.6  frontend/src/services/api.js — Camada de API
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Centraliza toda a comunicação HTTP com o backend FastAPI.
+
+CONFIGURAÇÃO DO AXIOS:
+  baseURL : "http://localhost:8000"
+  timeout : 10000ms (10 segundos)
+
+INTERCEPTOR DE REQUISIÇÃO:
+  Antes de TODA requisição ser enviada:
+  -> Lê o token do localStorage.
+  -> Se existir: adiciona header "Authorization: Bearer <token>".
+  -> O backend (get_current_user) lê esse header para autenticar.
+
+INTERCEPTOR DE RESPOSTA (tratamento de 401):
+  Se qualquer resposta vier com status 401 E existir um token no localStorage:
+  -> Remove token e user do localStorage.
+  -> Chama window.location.reload() para forçar volta à tela de login.
+  -> Isso cobre o caso de token expirado/invalidado pelo backend.
+  -> NOTA: O interceptor acessa o localStorage diretamente (não o Zustand)
+     para evitar importação circular entre api.js e useStore.js.
+
+FUNÇÕES EXPORTADAS:
+
+  Auth:
+    loginApi(username, password)  -> POST /auth/login
+    logoutApi()                   -> POST /auth/logout
+    meApi()                       -> GET  /auth/me
+
+  Propostas:
+    getPropostas(status)          -> GET  /propostas?status=X
+    importarProposta(data)        -> POST /propostas/importar
+    atualizarStatus(id, st, obs)  -> PUT  /propostas/{id}/status
+    getSummary()                  -> GET  /propostas/summary
+
+  Outros:
+    getCorretores()               -> GET  /corretores
+    getGrupos()                   -> GET  /grupos
+    getConvenios()                -> GET  /convenios
+    getBlacklist()                -> GET  /blacklist
+
+
+================================================================================
+  6. BANCO DE DADOS — TABELAS E RELACIONAMENTOS
+================================================================================
+
+  users ─────────────────────────────────────────────────────── (standalone)
+
+  grupos ◄──── corretores ◄──── propostas
+    │               │
+    └── regras_grupo └── (propostas.corretor_id -> corretores.id)
+
+  convenios ──────────────────────────────────────────── (lookup por nome)
+  blacklist ──────────────────────────────────────────── (lookup por CPF)
+
+CHAVES ESTRANGEIRAS:
+  corretores.grupo_id    -> grupos.id       (nullable)
+  regras_grupo.grupo_id  -> grupos.id       (obrigatório)
+  propostas.corretor_id  -> corretores.id   (nullable)
+
+NOTA: proposta.convenio é um campo texto, não FK. A validação do convênio
+é feita pela engine de regras buscando na tabela convenios por nome.
+Isso permite que propostas sejam criadas com convênios desconhecidos
+(resultando em status NAO_MAPEADA) sem violar integridade referencial.
+
+
+================================================================================
+  7. FLUXO DE AUTENTICAÇÃO
+================================================================================
+
+  PRIMEIRO ACESSO:
+  ┌─────────────┐     POST /auth/login      ┌─────────────┐
+  │  LoginPage  │ ──────────────────────►   │   Backend   │
+  │  (frontend) │   {username, password}    │   auth.py   │
+  └─────────────┘                           └──────┬──────┘
+                                                   │
+                                         Verifica hash da senha
+                                         Gera UUID como token
+                                         Salva token no banco
+                                                   │
+  ┌─────────────┐   ◄─────────────────────────────┘
+  │  useStore   │  {access_token, nome, cargo}
+  │  login()    │
+  └──────┬──────┘
+         │
+    Salva no localStorage:
+    - antifraude_token = UUID
+    - antifraude_user  = {username, nome, cargo}
+    Atualiza isAuthenticated=true
+         │
+    App.jsx renderiza Dashboard
+
+  REQUISIÇÕES AUTENTICADAS:
+  ┌─────────────┐                           ┌─────────────┐
+  │  api.js     │  Authorization: Bearer    │   Backend   │
+  │ (interceptor│ ──────────────────────►   │ get_current │
+  │  de request)│       <UUID>              │    _user()  │
+  └─────────────┘                           └──────┬──────┘
+                                                   │
+                                         Busca User com token=UUID
+                                         e ativo=True no banco
+                                                   │
+                                         OK → executa o endpoint
+                                         Não OK → HTTP 401
+
+  LOGOUT:
+  ┌─────────────┐     POST /auth/logout     ┌─────────────┐
+  │  useStore   │ ──────────────────────►   │   Backend   │
+  │  logout()   │   Bearer <token>          │   auth.py   │
+  └──────┬──────┘                           └──────┬──────┘
+         │                                         │
+    Remove do localStorage              Define user.token = None
+    Reseta estado Zustand                  db.commit()
+    isAuthenticated=false
+         │
+    App.jsx renderiza LoginPage
+
+
+================================================================================
+  8. ENGINE DE REGRAS ANTIFRAUDE — FLUXO COMPLETO
+================================================================================
+
+  ENTRADA: proposta recém-criada (com id gerado via db.flush)
+
+  ┌──────────────────────────────────────────────────┐
+  │ 1. CPF do cliente está na tabela blacklist?       │
+  │    SIM ──► status = "PENDENTE"  (retorna aqui)   │
+  │    NÃO ──► continua                              │
+  └──────────────────────────────────────────────────┘
+               │
+  ┌──────────────────────────────────────────────────┐
+  │ 2. Proposta tem convenio informado?               │
+  │    SIM: busca na tabela convenios                │
+  │       Não encontrou ──► status = "NAO_MAPEADA"  │
+  │       Encontrou     ──► continua                 │
+  │    NÃO (None): pula esta verificação             │
+  └──────────────────────────────────────────────────┘
+               │
+  ┌──────────────────────────────────────────────────┐
+  │ 3. Proposta tem corretor_id?                      │
+  │    NÃO ──► status = "ANALISAR"                   │
+  │    SIM: busca corretor no banco                  │
+  │       Não encontrou ──► status = "ANALISAR"      │
+  │       Encontrou sem grupo ──► status = "ANALISAR"│
+  │       Encontrou COM grupo: busca grupo           │
+  │         Grupo não existe ──► status = "ANALISAR" │
+  └──────────────────────────────────────────────────┘
+               │
+  ┌──────────────────────────────────────────────────┐
+  │ 4. proposta.valor <= grupo.limite?                │
+  │    SIM ──► status = "APROVADA"                   │
+  │    NÃO ──► status = "ANALISAR"                   │
+  └──────────────────────────────────────────────────┘
+
+
+================================================================================
+  9. STATUS DE PROPOSTAS — TODOS OS ESTADOS POSSÍVEIS
+================================================================================
+
+  STATUS              | ORIGEM     | SIGNIFICADO
+  --------------------|------------|----------------------------------------------
+  ANALISAR            | Automático | Proposta válida mas valor > limite do grupo,
+                      |            | ou corretor sem grupo. Exige revisão humana.
+  ANALISAR_DOCUMENTO  | Manual     | Analista identificou problema de documentação.
+  APROVAR             | Manual     | Gestor aprovou e está aguardando operação final.
+  PENDENTE            | Automático | CPF do cliente está na blacklist.
+  PENDENCIA_REGULARIZADA | Manual  | Pendência foi resolvida pelo cliente.
+  AGENDADA            | Manual     | Assinatura/formalização agendada.
+  APROVADA            | Automático | Valor dentro do limite do grupo do corretor.
+  REPROVADA           | Manual     | Proposta rejeitada definitivamente.
+  NAO_MAPEADA         | Automático | Convênio informado não existe no cadastro.
+  AGUARDANDO_BANCO    | Manual     | Proposta enviada ao banco, aguardando retorno.
+
+
+================================================================================
+  10. USUÁRIOS DO SISTEMA (SEED)
+================================================================================
+
+  USERNAME  | SENHA      | NOME              | CARGO
+  ----------|------------|-------------------|--------------
+  admin     | admin123   | Administrador     | Administrador
+  cesar     | cesar123   | César Barros      | Gestor
+  leo       | leo123     | Leonardo Silva    | Analista
+  julia     | julia123   | Julia Santos      | Analista
+  sergio    | sergio123  | Sergio Oliveira   | Operador
+
+  IMPORTANTE: As senhas são armazenadas como SHA-256 sem salt. Indicado apenas
+  para uso interno em rede local. Em produção, usar bcrypt ou argon2 com salt.
+
+
+================================================================================
+  11. COMO RODAR O PROJETO
+================================================================================
+
+PRÉ-REQUISITOS:
+  - Python 3.11 ou superior instalado
+  - Node.js 18 ou superior instalado
+  - Git
+
+PASSO 1 — Clonar o repositório:
+  git clone https://github.com/DevCesarUnica/antifraude-unica.git
+  cd antifraude-unica
+
+PASSO 2 — Instalar dependências do backend:
+  cd backend
+  pip install -r requirements.txt
+
+PASSO 3 — Popular o banco de dados:
+  python seed.py
+  (deve exibir "Seed concluído com sucesso!" ao final)
+
+PASSO 4 — Iniciar o backend (deixar rodando):
+  python -m uvicorn app.main:app --reload --port 8000
+  (deve exibir "Uvicorn running on http://127.0.0.1:8000")
+
+PASSO 5 — Instalar dependências do frontend (em outro terminal):
+  cd ../frontend
+  npm install
+
+PASSO 6 — Iniciar o frontend (deixar rodando):
+  npm run dev
+  (deve exibir "Local: http://localhost:5173")
+
+PASSO 7 — Acessar no navegador:
+  http://localhost:5173
+  Login: admin / admin123
+
+DOCUMENTAÇÃO INTERATIVA DA API:
+  http://localhost:8000/docs   (Swagger UI — todos os endpoints com teste)
+  http://localhost:8000/redoc  (ReDoc — versão de leitura)
+
+
+================================================================================
+  12. ENDPOINTS DA API — REFERÊNCIA COMPLETA
+================================================================================
+
+  AUTENTICAÇÃO (sem proteção por token):
+  POST   /auth/login           Login com username e password
+  POST   /auth/logout          Invalida o token atual (requer token)
+  GET    /auth/me              Retorna dados do usuário logado (requer token)
+
+  PROPOSTAS (requerem token):
+  GET    /propostas/summary    Contagem e valor total por status
+  GET    /propostas            Lista propostas (query: ?status=ANALISAR)
+  POST   /propostas/importar   Cria proposta e aplica engine de regras
+  PUT    /propostas/{id}/status Atualiza status manualmente
+
+  CORRETORES (requerem token):
+  GET    /corretores           Lista todos os corretores
+  POST   /corretores           Cria novo corretor
+  PUT    /corretores/{id}/grupo Vincula corretor a um grupo
+
+  GRUPOS (requerem token):
+  GET    /grupos               Lista todos os grupos
+  POST   /grupos               Cria novo grupo
+
+  CONVÊNIOS (requerem token):
+  GET    /convenios            Lista todos os convênios
+  POST   /convenios            Cria novo convênio
+  PUT    /convenios/{id}       Atualiza convênio existente
+
+  BLACKLIST (requerem token):
+  GET    /blacklist            Lista todos os CPFs bloqueados
+  POST   /blacklist            Adiciona CPF à blacklist
+  DELETE /blacklist/{id}       Remove CPF da blacklist
+
+  REGRAS (requerem token):
+  GET    /regras               Lista todas as regras de grupo
+  POST   /regras               Cria regra vinculada a um grupo
+
+  ROOT (sem proteção):
+  GET    /                     Health check { status: "ok" }
+
+
+================================================================================
+  13. HISTÓRICO DE VERSÕES
+================================================================================
+
+  v1.0 — MVP inicial (commit 9e119f2)
+    - Dashboard com cards de status e tabela de propostas
+    - Engine de regras antifraude (blacklist, convênio, limite de grupo)
+    - CRUD de propostas, corretores, grupos, convênios, blacklist, regras
+    - Tema dark/light
+    - Seed com dados de teste
+
+  v1.1 — Autenticação (commit 61bd8f5)
+    - Modelo User com token UUID e hash de senha SHA-256
+    - Endpoints POST /auth/login, POST /auth/logout, GET /auth/me
+    - Tela de login com validação e feedback de erro
+    - Token Bearer injetado automaticamente em todas as requisições
+    - Todos os routers protegidos via Depends(get_current_user)
+    - Sessão persistida no localStorage (sobrevive a recarregamento da página)
+    - Tratamento global de 401 (logout automático se token invalidado)
+    - Exibição do nome e cargo do usuário no cabeçalho
+    - Botão "Sair" com confirmação visual via hover
+    - Seed ampliado com 5 usuários pré-configurados
+
+  v1.2 — Hierarquia de usuários (commit 06bfe82)
+    BACKEND:
+    - Modelo User ampliado: campo email (único, nullable) e role (ADMIN/GESTOR/ANALISTA/OPERADOR)
+    - Seed com migração automática via SQLite ALTER TABLE (sem perder dados existentes)
+    - Login aceita username OU email (via sqlalchemy or_())
+    - LoginResponse agora inclui o campo role
+    - Função require_role(["ADMIN","GESTOR"]) para proteger endpoints por perfil
+    - Novo router /users com endpoints:
+        GET    /users/              — lista (ADMIN + GESTOR)
+        POST   /users/              — cria (ADMIN)
+        PUT    /users/{id}          — edita (ADMIN)
+        PATCH  /users/{id}/status   — ativa/desativa (ADMIN)
+    - Endpoint PUT /propostas/{id}/status agora bloqueia OPERADOR de aprovar/reprovar
+    - Cargo derivado automaticamente do role ao criar usuário (ex: GESTOR -> "Gestor")
+
+    FRONTEND:
+    - role salvo no user do localStorage e Zustand
+    - Header: dropdown no avatar com menu (Dashboard / Gestão de Usuários / Sair)
+    - "Gestão de Usuários" visível apenas para ADMIN e GESTOR
+    - Roteamento de páginas via currentPage no store (sem React Router)
+    - Breadcrumb no Header indica a página atual
+    - Nova página UsersPage.jsx:
+        - Tabela com avatar, nome, username, email, badge de role colorido, status
+        - Botões editar (abre modal pré-preenchido) e ativar/desativar por linha
+        - Admin não pode desativar a si mesmo
+        - Modal unificado para criar e editar usuário
+        - Username desabilitado na edição (imutável)
+        - Senha opcional na edição (deixe em branco para manter)
+    - Cores dos badges de role:
+        ADMIN -> vermelho | GESTOR -> azul | ANALISTA -> roxo | OPERADOR -> cinza
+
+================================================================================
+  FIM DA DOCUMENTAÇÃO
+================================================================================

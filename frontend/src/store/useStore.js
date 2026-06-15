@@ -5,6 +5,7 @@ import {
   atualizarStatus as apiAtualizarStatus,
   loginApi,
   logoutApi,
+  meApi,
   getUsers,
   createUserApi,
   updateUserApi,
@@ -35,6 +36,16 @@ const useStore = create((set, get) => ({
     localStorage.setItem(TOKEN_KEY, access_token)
     localStorage.setItem(USER_KEY, JSON.stringify(user))
     set({ token: access_token, user, isAuthenticated: true })
+  },
+
+  refreshCurrentUser: async () => {
+    try {
+      const response = await meApi()
+      const { username, nome, cargo, role } = response.data
+      const user = { username, nome, cargo, role }
+      localStorage.setItem(USER_KEY, JSON.stringify(user))
+      set({ user })
+    } catch {}
   },
 
   logout: async () => {

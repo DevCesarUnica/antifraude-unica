@@ -24,7 +24,7 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
 
-  const isAdmin = currentUser?.role === 'ADMIN'
+  const isAdmin = !['GESTOR', 'ANALISTA', 'OPERADOR'].includes(currentUser?.role)
 
   useEffect(() => { fetchUsers() }, [])
 

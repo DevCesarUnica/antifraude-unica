@@ -1,0 +1,218 @@
+================================================================================
+  SISTEMA ANTIFRAUDE - UNICA PROMOTORA
+  HIERARQUIA DE USUÁRIOS E PERMISSÕES
+================================================================================
+  Última atualização: 15/06/2026
+  Versão do sistema : MVP 1.2
+================================================================================
+
+
+================================================================================
+  VISÃO GERAL
+================================================================================
+
+O sistema possui 4 níveis de acesso, do mais alto ao mais restrito:
+
+  ADMIN  >  GESTOR  >  ANALISTA  >  OPERADOR
+
+Cada nível herda responsabilidades distintas dentro da Mesa de Crédito
+Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
+
+
+================================================================================
+  PERFIS DETALHADOS
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  [1] ADMIN — Administrador
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Quem é:
+    Responsável técnico e operacional máximo do sistema. Gerencia toda a
+    equipe e tem controle total sobre usuários e propostas.
+
+  O que pode fazer:
+
+    USUÁRIOS:
+      ✅ Criar novos usuários (com qualquer perfil)
+      ✅ Editar dados de qualquer usuário (nome, email, senha, perfil)
+      ✅ Ativar ou desativar qualquer usuário
+      ✅ Visualizar a lista completa de usuários
+      ⛔ Não pode desativar a si mesmo
+
+    PROPOSTAS:
+      ✅ Visualizar todas as propostas
+      ✅ Alterar o status de qualquer proposta
+      ✅ Aprovar propostas (status → APROVADA)
+      ✅ Reprovar propostas (status → REPROVADA)
+      ✅ Mover para qualquer outro status disponível
+
+  Usuário padrão do sistema:
+    Login : admin
+    Senha : admin123
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  [2] GESTOR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Quem é:
+    Líder da equipe de crédito. Supervisiona analistas e operadores,
+    acompanha o desempenho das propostas e pode visualizar a equipe,
+    mas não tem poder de criar ou editar usuários.
+
+  O que pode fazer:
+
+    USUÁRIOS:
+      ✅ Visualizar a lista de usuários (somente leitura)
+      ❌ Não pode criar usuários
+      ❌ Não pode editar usuários
+      ❌ Não pode ativar ou desativar usuários
+
+    PROPOSTAS:
+      ✅ Visualizar todas as propostas
+      ✅ Alterar o status de qualquer proposta
+      ✅ Aprovar propostas (status → APROVADA)
+      ✅ Reprovar propostas (status → REPROVADA)
+      ✅ Mover para qualquer outro status disponível
+
+  Usuário padrão do sistema:
+    Login : cesar
+    Senha : cesar123
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  [3] ANALISTA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Quem é:
+    Responsável pela análise detalhada das propostas. Pode tomar decisões
+    de aprovação e reprovação, mas não tem acesso à gestão da equipe.
+
+  O que pode fazer:
+
+    USUÁRIOS:
+      ❌ Não visualiza a lista de usuários
+      ❌ Não pode criar, editar ou desativar usuários
+      ❌ O menu "Gestão de Usuários" não aparece para este perfil
+
+    PROPOSTAS:
+      ✅ Visualizar todas as propostas
+      ✅ Alterar o status de qualquer proposta
+      ✅ Aprovar propostas (status → APROVADA)
+      ✅ Reprovar propostas (status → REPROVADA)
+      ✅ Mover para qualquer outro status disponível
+
+  Usuários padrão do sistema:
+    Login : leo    / Senha : leo123
+    Login : julia  / Senha : julia123
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  [4] OPERADOR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Quem é:
+    Nível de entrada. Realiza operações básicas de triagem e
+    movimentação de propostas, mas não pode tomar decisões finais
+    de aprovação ou reprovação.
+
+  O que pode fazer:
+
+    USUÁRIOS:
+      ❌ Não visualiza a lista de usuários
+      ❌ Não pode criar, editar ou desativar usuários
+      ❌ O menu "Gestão de Usuários" não aparece para este perfil
+
+    PROPOSTAS:
+      ✅ Visualizar todas as propostas
+      ✅ Alterar status (ANALISAR, PENDENTE, AGENDADA, AGUARDANDO_BANCO, etc.)
+      ❌ NÃO pode aprovar propostas (status → APROVADA)
+      ❌ NÃO pode reprovar propostas (status → REPROVADA)
+          → Tentativa de aprovação/reprovação retorna erro 403
+
+  Usuário padrão do sistema:
+    Login : sergio
+    Senha : sergio123
+
+
+================================================================================
+  TABELA RESUMO DE PERMISSÕES
+================================================================================
+
+  AÇÃO                              ADMIN   GESTOR  ANALISTA  OPERADOR
+  ─────────────────────────────────────────────────────────────────────
+  Criar usuário                       ✅      ❌       ❌        ❌
+  Editar usuário                      ✅      ❌       ❌        ❌
+  Ativar / Desativar usuário          ✅      ❌       ❌        ❌
+  Visualizar lista de usuários        ✅      ✅       ❌        ❌
+  ─────────────────────────────────────────────────────────────────────
+  Visualizar propostas                ✅      ✅       ✅        ✅
+  Alterar status da proposta          ✅      ✅       ✅        ✅
+  Aprovar proposta (→ APROVADA)       ✅      ✅       ✅        ❌
+  Reprovar proposta (→ REPROVADA)     ✅      ✅       ✅        ❌
+
+
+================================================================================
+  ONDE AS PERMISSÕES SÃO APLICADAS
+================================================================================
+
+  BACKEND (API — proteção real):
+    - GET  /users/              → exige role ADMIN ou GESTOR
+    - POST /users/              → exige role ADMIN
+    - PUT  /users/{id}          → exige role ADMIN
+    - PATCH /users/{id}/status  → exige role ADMIN
+    - PUT  /propostas/{id}/status → bloqueia OPERADOR se status for
+                                    APROVADA ou REPROVADA (HTTP 403)
+
+  FRONTEND (interface — proteção visual):
+    - Menu "Gestão de Usuários" visível apenas para ADMIN e GESTOR
+    - Botão "+ Novo Usuário" visível apenas para ADMIN
+    - Botões de editar e ativar/desativar visíveis apenas para ADMIN
+    - OPERADOR não vê o botão de Aprovar/Reprovar nas propostas
+      (a ser implementado conforme o sistema evoluir)
+
+  NOTA: A proteção real do sistema está sempre no backend. A proteção
+  visual do frontend é apenas para melhorar a experiência do usuário.
+  Mesmo que alguém tente chamar a API diretamente sem permissão,
+  o backend rejeitará a requisição com erro 403 Forbidden.
+
+
+================================================================================
+  COMO CRIAR UM NOVO USUÁRIO
+================================================================================
+
+  Somente o perfil ADMIN pode criar usuários. Siga os passos:
+
+  1. Faça login com uma conta ADMIN (ex: admin / admin123)
+  2. Clique no avatar (círculo vermelho com inicial) no canto superior direito
+  3. Clique em "Gestão de Usuários" no menu que aparecer
+  4. Clique no botão "+ Novo Usuário" (vermelho, canto superior direito)
+  5. Preencha o formulário:
+       - Nome completo  : nome de exibição do usuário
+       - Usuário (login): identificador único para login (sem espaços)
+       - Email          : opcional, também pode ser usado para login
+       - Senha          : senha inicial (o usuário deve alterar depois)
+       - Perfil         : selecione ADMIN, GESTOR, ANALISTA ou OPERADOR
+  6. Clique em "Criar"
+
+  O usuário criado poderá fazer login imediatamente com o username
+  e a senha definidos no cadastro.
+
+
+================================================================================
+  COMO DESATIVAR UM USUÁRIO
+================================================================================
+
+  1. Acesse "Gestão de Usuários" (requer ADMIN)
+  2. Localize o usuário na tabela
+  3. Clique no ícone de círculo com X na coluna "Ações"
+  4. O status muda para "Inativo" e o token é invalidado imediatamente
+     (se o usuário estiver logado, será desconectado na próxima requisição)
+
+  NOTA: Um ADMIN não pode desativar a si mesmo.
+
+
+================================================================================
+  FIM DO DOCUMENTO
+================================================================================

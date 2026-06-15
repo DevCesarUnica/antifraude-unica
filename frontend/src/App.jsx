@@ -6,11 +6,17 @@ import LoginPage from './pages/LoginPage'
 import UsersPage from './pages/UsersPage'
 
 export default function App() {
-  const { tema, isAuthenticated, currentPage, user } = useStore()
+  const { tema, isAuthenticated, currentPage, user, refreshCurrentUser } = useStore()
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', tema)
   }, [tema])
+
+  useEffect(() => {
+    if (isAuthenticated && !user?.role) {
+      refreshCurrentUser()
+    }
+  }, [isAuthenticated])
 
   if (!isAuthenticated) {
     return <LoginPage />
@@ -18,7 +24,8 @@ export default function App() {
 
   function renderPage() {
     if (currentPage === 'users') {
-      if (user?.role !== 'ADMIN' && user?.role !== 'GESTOR') return <Dashboard />
+      const bloqueado = user?.role === 'ANALISTA' || user?.role === 'OPERADOR'
+      if (bloqueado) return <Dashboard />
       return <UsersPage />
     }
     return <Dashboard />

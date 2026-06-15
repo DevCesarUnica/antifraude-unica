@@ -17,7 +17,7 @@ export default function Header() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const canSeeUsers = user?.role === 'ADMIN' || user?.role === 'GESTOR'
+  const canSeeUsers = !['ANALISTA', 'OPERADOR'].includes(user?.role)
 
   return (
     <header

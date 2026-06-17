@@ -4,76 +4,49 @@ Sistema Antifraude e Automação de Propostas Financeiras — Unica Promotora
 
 ---
 
-## Resumo
-
-O sistema automatiza o processo de análise antifraude e aprovação de propostas de diferentes instituições financeiras. Aplica regras baseadas em perfis de corretores (esteiras), verificação de blacklist e decisões automáticas ou manuais, reduzindo processos manuais e otimizando a análise das propostas.
-
----
-
 ## Tecnologias
 
 | Camada | Tecnologia |
 |---|---|
-| Backend | Python 3.10+ / FastAPI / SQLAlchemy / SQLite |
-| Frontend | React 18 / Vite / Zustand / Tailwind CSS |
-| Autenticação | Token Bearer (UUID) com hash SHA-256 |
+| Backend | Python 3.10+ / FastAPI / SQLAlchemy / PostgreSQL |
+| Frontend | React 18 / Vite / TypeScript / Tailwind CSS |
+| Autenticação | JWT (python-jose + bcrypt) |
+| Containerização | Docker + docker-compose |
 
 ---
 
-## Como rodar o projeto
+## Pré-requisitos
 
-### Pré-requisitos
-
-- Python 3.10 ou superior
-- Node.js 18 ou superior
-- Git
+- Python 3.10+
+- Node.js 18+
+- PostgreSQL 15+ rodando localmente
 
 ---
 
-### 1. Clonar o repositório
+## Como rodar
 
-```bash
-git clone https://github.com/DevCesarUnica/antifraude-unica.git
-cd antifraude-unica
-```
-
----
-
-### 2. Configurar o Backend
+### 1. Backend
 
 ```bash
 cd backend
 pip install -r requirements.txt
-python seed.py
 ```
 
-> **Por que esses comandos?**
->
-> - `cd backend` — entra na pasta do backend, onde estão os arquivos Python. O `seed.py` precisa ser executado de dentro dessa pasta porque ele localiza o banco de dados (`antifraude.db`) e os módulos do projeto (`app/`) usando caminhos relativos. Se rodar de fora da pasta, o Python não encontra os arquivos e dá erro de importação.
->
-> - `python seed.py` — o banco de dados **não vai para o repositório** (está no `.gitignore`). Isso significa que ao clonar o projeto, o banco existe mas está completamente vazio — sem nenhum usuário, grupo, corretor ou proposta. O `seed.py` é o script que cria e popula tudo isso: cria as tabelas, cadastra os 5 usuários padrão e insere dados de exemplo para o sistema funcionar.
+Configure as variáveis de ambiente criando `backend/.env`:
+```env
+DATABASE_URL=postgresql://postgres:SUA_SENHA@localhost:5432/antifraude
+SECRET_KEY=mude-em-producao
+ENVIRONMENT=development
+```
 
----
-
-### 3. Iniciar o Backend
-
-Abra um terminal e deixe rodando:
-
+Inicie o servidor:
 ```bash
-cd backend
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Aguarde aparecer:
-```
-INFO: Uvicorn running on http://127.0.0.1:8000
-```
+O banco é criado automaticamente na primeira execução. Um usuário admin padrão é criado se não existir nenhum usuário.
 
----
-
-### 4. Configurar o Frontend
-
-Abra **outro terminal**:
+### 2. Frontend
 
 ```bash
 cd frontend
@@ -81,32 +54,19 @@ npm install
 npm run dev
 ```
 
-Aguarde aparecer:
-```
-VITE ready  →  Local: http://localhost:5173/
-```
+Acesse: **http://localhost:3000**
 
 ---
 
-### 5. Acessar o sistema
+## Usuário padrão
 
-Abra no navegador: **http://localhost:5173**
-
----
-
-## Usuários padrão
-
-Criados automaticamente pelo `seed.py`:
+Criado automaticamente ao iniciar o backend pela primeira vez (se o banco estiver vazio):
 
 | Usuário | Senha | Perfil |
 |---|---|---|
 | `admin` | `admin123` | Administrador |
-| `cesar` | `cesar123` | Gestor |
-| `leo` | `leo123` | Analista |
-| `julia` | `julia123` | Analista |
-| `sergio` | `sergio123` | Operador |
 
-> As senhas devem ser alteradas em produção.
+> Altere a senha após o primeiro acesso.
 
 ---
 
@@ -114,10 +74,12 @@ Criados automaticamente pelo `seed.py`:
 
 | Ação | Admin | Gestor | Analista | Operador |
 |---|:---:|:---:|:---:|:---:|
-| Criar / editar usuários | ✅ | ❌ | ❌ | ❌ |
-| Ver lista de usuários | ✅ | ✅ | ❌ | ❌ |
+| Gerenciar usuários | ✅ | ✅* | ❌ | ❌ |
+| Excluir usuários | ✅ | ✅* | ❌ | ❌ |
 | Aprovar / reprovar proposta | ✅ | ✅ | ✅ | ❌ |
-| Alterar status de proposta | ✅ | ✅ | ✅ | ✅ |
+| Visualizar propostas | ✅ | ✅ | ✅ | ✅ |
+
+*Gestor não pode alterar ou excluir admins.
 
 ---
 
@@ -127,24 +89,44 @@ Criados automaticamente pelo `seed.py`:
 antifraude/
 ├── backend/
 │   ├── app/
-│   │   ├── routers/       # Endpoints da API
-│   │   ├── services/      # Engine de regras antifraude
-│   │   ├── models.py      # Tabelas do banco
-│   │   ├── schemas.py     # Validação de dados
-│   │   └── main.py        # Inicialização da API
-│   ├── seed.py            # Popula o banco com dados iniciais
+│   │   ├── core/          # Config, logging, circuit breaker
+│   │   ├── routers/       # Endpoints: auth, usuarios, propostas, regras, bancos, titan
+│   │   ├── services/      # Motor antifraude, auditoria, integração Titan, bancos
+│   │   ├── workers/       # Tarefas Celery (processamento assíncrono)
+│   │   ├── models.py      # Tabelas do banco (SQLAlchemy)
+│   │   ├── schemas.py     # Validação de dados (Pydantic)
+│   │   ├── database.py    # Conexão PostgreSQL
+│   │   └── main.py        # Inicialização FastAPI
+│   ├── Dockerfile
 │   └── requirements.txt
-└── frontend/
-    └── src/
-        ├── pages/         # Dashboard, Login, Usuários
-        ├── components/    # Header, Cards, Tabela
-        ├── store/         # Estado global (Zustand)
-        └── services/      # Comunicação com a API
+├── frontend/
+│   └── src/
+│       ├── pages/         # Dashboard, Propostas, Regras, Bancos, Usuários, Login
+│       ├── components/    # Header, Layout
+│       ├── app/           # Rotas Next.js (App Router)
+│       └── lib/           # Cliente HTTP (Axios)
+├── rpa/
+│   └── playwright/        # Automação de bancos sem API
+├── docs/                  # Documentação de discovery
+├── docker-compose.yml     # Orquestração completa (backend + PostgreSQL + Redis)
+└── .env.example           # Variáveis de ambiente de exemplo
+```
+
+---
+
+## Docker (opcional)
+
+Para rodar tudo com Docker:
+
+```bash
+cp .env.example .env
+# Edite .env com suas configurações
+docker-compose up -d
 ```
 
 ---
 
 ## Documentação
 
-- `DOCUMENTACAO_TECNICA.txt` — explicação detalhada de cada arquivo do projeto
-- `HIERARQUIA_USUARIOS.txt` — permissões completas de cada perfil de usuário
+- `docs/` — Análise de requisitos e discovery do projeto
+- `HIERARQUIA_USUARIOS.txt` — Permissões detalhadas por perfil

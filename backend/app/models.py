@@ -1,86 +1,236 @@
+"""
+Modelos de banco de dados — PostgreSQL com JSONB para dados dinâmicos.
+Todos usam UUID como PK para evitar colisões em ambiente distribuído.
+"""
+
+import uuid
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String
-from sqlalchemy.orm import relationship
+from enum import Enum as PyEnum
+
+from sqlalchemy import (
+    Boolean, DateTime, Float, ForeignKey,
+    Integer, String, Text, Enum, UniqueConstraint,
+    Index,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship, mapped_column, Mapped
 
 from app.database import Base
 
 
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, nullable=False)
-    email = Column(String, unique=True, nullable=True, index=True)
-    password_hash = Column(String, nullable=False)
-    nome = Column(String, nullable=False)
-    cargo = Column(String, default="Operador", nullable=False)
-    role = Column(String, default="OPERADOR", nullable=False)
-    token = Column(String, nullable=True, unique=True)
-    ativo = Column(Boolean, default=True, nullable=False)
+def _uuid():
+    return str(uuid.uuid4())
 
 
-class Grupo(Base):
-    __tablename__ = "grupos"
+def _now():
+    return datetime.utcnow()
 
-    id = Column(Integer, primary_key=True, index=True)
-    nome = Column(String, unique=True, nullable=False)
-    limite = Column(Float, nullable=False)
 
-    corretores = relationship("Corretor", back_populates="grupo")
-    regras = relationship("RegraGrupo", back_populates="grupo")
+# ── Enums ────────────────────────────────────────────────────────────────────
 
+class StatusProposta(str, PyEnum):
+    ENFILEIRADA           = "ENFILEIRADA"
+    EM_ANALISE            = "EM_ANALISE"
+    APROVADA              = "APROVADA"
+    REPROVADA             = "REPROVADA"
+    BLOQUEADA             = "BLOQUEADA"
+    ANALISE_MANUAL        = "ANALISE_MANUAL"
+    ENVIADA_BANCO         = "ENVIADA_BANCO"
+    CONFIRMADA_BANCO      = "CONFIRMADA_BANCO"
+    ERRO                  = "ERRO"
+
+
+class ResultadoMotor(str, PyEnum):
+    APROVADO = "APROVADO"
+    MANUAL   = "MANUAL"
+    BLOQUEADO = "BLOQUEADO"
+
+
+class TipoRegra(str, PyEnum):
+    BLACKLIST      = "BLACKLIST"
+    VALOR_MAXIMO   = "VALOR_MAXIMO"
+    BANCO_CONVENIO = "BANCO_CONVENIO"
+    UF_BLOQUEADA   = "UF_BLOQUEADA"
+    SCORE_RISCO    = "SCORE_RISCO"
+    LIMITE_DIARIO  = "LIMITE_DIARIO"
+
+
+class TipoEvento(str, PyEnum):
+    CRIACAO        = "CRIACAO"
+    ENFILEIRAMENTO = "ENFILEIRAMENTO"
+    INICIO_ANALISE = "INICIO_ANALISE"
+    DECISAO_MOTOR  = "DECISAO_MOTOR"
+    ENVIO_BANCO    = "ENVIO_BANCO"
+    RETORNO_BANCO  = "RETORNO_BANCO"
+    ERRO           = "ERRO"
+    REPROCESSAMENTO= "REPROCESSAMENTO"
+    ALTERACAO_MANUAL = "ALTERACAO_MANUAL"
+
+
+# ── Corretor ─────────────────────────────────────────────────────────────────
 
 class Corretor(Base):
     __tablename__ = "corretores"
 
-    id = Column(Integer, primary_key=True, index=True)
-    nome = Column(String, nullable=False)
-    cpf = Column(String, unique=True, nullable=False)
-    grupo_id = Column(Integer, ForeignKey("grupos.id"), nullable=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    nome: Mapped[str] = mapped_column(String(200), nullable=False)
+    cpf: Mapped[str] = mapped_column(String(14), unique=True, nullable=False, index=True)
+    codigo_externo: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
+    limite_valor_diario: Mapped[float] = mapped_column(Float, default=0.0)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    metadados: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
-    grupo = relationship("Grupo", back_populates="corretores")
     propostas = relationship("Proposta", back_populates="corretor")
 
 
-class Convenio(Base):
-    __tablename__ = "convenios"
+# ── Proposta ─────────────────────────────────────────────────────────────────
 
-    id = Column(Integer, primary_key=True, index=True)
-    nome = Column(String, unique=True, nullable=False)
-    banco = Column(String, nullable=False)
-    ativo = Column(Boolean, default=True, nullable=False)
+class Proposta(Base):
+    __tablename__ = "propostas"
+    __table_args__ = (
+        UniqueConstraint("proposta_id_externo", name="uq_proposta_id_externo"),
+        Index("ix_propostas_status", "status"),
+        Index("ix_propostas_cpf_cliente", "cpf_cliente"),
+    )
 
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+
+    # Chave de idempotência — nunca duplicar envio ao banco
+    proposta_id_externo: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+
+    corretor_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("corretores.id"), nullable=True)
+    cpf_cliente: Mapped[str] = mapped_column(String(14), nullable=False)
+    nome_cliente: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    uf_cliente: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    banco: Mapped[str] = mapped_column(String(100), nullable=False)
+    convenio: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    produto: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    valor: Mapped[float] = mapped_column(Float, nullable=False)
+
+    status: Mapped[str] = mapped_column(
+        Enum(StatusProposta, name="status_proposta"),
+        default=StatusProposta.ENFILEIRADA,
+        nullable=False,
+    )
+
+    # Motor antifraude
+    score_fraude: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    resultado_motor: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    decisao_detalhes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Dados brutos da proposta (flexível)
+    payload_original: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Resposta do banco
+    resposta_banco: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    id_operacao_banco: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Controle
+    tentativas: Mapped[int] = mapped_column(Integer, default=0)
+    ultimo_erro: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+    corretor = relationship("Corretor", back_populates="propostas")
+    auditoria = relationship("AuditoriaLog", back_populates="proposta", order_by="AuditoriaLog.timestamp")
+
+
+# ── Regra Antifraude ─────────────────────────────────────────────────────────
+
+class RegraAntifraude(Base):
+    __tablename__ = "regras_antifraude"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    nome: Mapped[str] = mapped_column(String(200), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tipo: Mapped[str] = mapped_column(
+        Enum(TipoRegra, name="tipo_regra"),
+        nullable=False,
+    )
+    # Parâmetros da regra em JSON — ex: {"valor_maximo": 50000, "convenios": ["INSS"]}
+    parametros: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    # Score adicionado ao score de risco quando a regra dispara
+    peso_score: Mapped[int] = mapped_column(Integer, default=0)
+    # Se True, bloqueia imediatamente (resultado=BLOQUEADO)
+    bloqueante: Mapped[bool] = mapped_column(Boolean, default=False)
+    prioridade: Mapped[int] = mapped_column(Integer, default=100)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    versao: Mapped[int] = mapped_column(Integer, default=1)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+# ── Blacklist ─────────────────────────────────────────────────────────────────
 
 class Blacklist(Base):
     __tablename__ = "blacklist"
 
-    id = Column(Integer, primary_key=True, index=True)
-    cpf = Column(String, unique=True, nullable=False)
-    motivo = Column(String, nullable=False)
-    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    cpf: Mapped[str] = mapped_column(String(14), unique=True, nullable=False, index=True)
+    motivo: Mapped[str] = mapped_column(Text, nullable=False)
+    adicionado_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
-class RegraGrupo(Base):
-    __tablename__ = "regras_grupo"
+# ── Auditoria (append-only, NUNCA alterar registros) ─────────────────────────
 
-    id = Column(Integer, primary_key=True, index=True)
-    grupo_id = Column(Integer, ForeignKey("grupos.id"), nullable=False)
-    descricao = Column(String, nullable=False)
+class AuditoriaLog(Base):
+    __tablename__ = "auditoria_logs"
+    __table_args__ = (
+        Index("ix_auditoria_proposta_id", "proposta_id"),
+        Index("ix_auditoria_timestamp", "timestamp"),
+    )
 
-    grupo = relationship("Grupo", back_populates="regras")
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    proposta_id: Mapped[str] = mapped_column(String(36), ForeignKey("propostas.id"), nullable=False)
+    evento: Mapped[str] = mapped_column(
+        Enum(TipoEvento, name="tipo_evento"),
+        nullable=False,
+    )
+    dados: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    usuario: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ip_origem: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    proposta = relationship("Proposta", back_populates="auditoria")
 
 
-class Proposta(Base):
-    __tablename__ = "propostas"
+# ── Usuário ──────────────────────────────────────────────────────────────────
 
-    id = Column(Integer, primary_key=True, index=True)
-    cpf_cliente = Column(String, nullable=False)
-    banco = Column(String, nullable=False)
-    valor = Column(Float, nullable=False)
-    status = Column(String, default="ANALISAR", nullable=False)
-    corretor_id = Column(Integer, ForeignKey("corretores.id"), nullable=True)
-    convenio = Column(String, nullable=True)
-    data = Column(DateTime, default=datetime.utcnow, nullable=False)
-    observacao = Column(String, nullable=True)
+class PerfilUsuario(str, PyEnum):
+    ADMIN    = "admin"
+    GESTOR   = "gestor"
+    ANALISTA = "analista"
+    OPERADOR = "operador"
 
-    corretor = relationship("Corretor", back_populates="propostas")
+
+class Usuario(Base):
+    __tablename__ = "usuarios"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(200), unique=True, nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    nome: Mapped[str] = mapped_column(String(200), nullable=False)
+    cargo: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    perfil: Mapped[str] = mapped_column(
+        Enum(PerfilUsuario, name="perfil_usuario"),
+        default=PerfilUsuario.OPERADOR,
+        nullable=False,
+    )
+    senha_hash: Mapped[str] = mapped_column(String(200), nullable=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+# ── Cache Titan (TTL controlado pela app) ────────────────────────────────────
+
+class TitanCache(Base):
+    __tablename__ = "titan_cache"
+
+    endpoint: Mapped[str] = mapped_column(String(200), primary_key=True)
+    dados: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    cached_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    expira_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)

@@ -2,8 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Banco — SQLite por padrão no dev local; troque por postgresql:// em produção
-    database_url: str = "sqlite:///./antifraude_v2.db"
+    database_url: str = "postgresql://postgres:unica123@localhost:5432/antifraude"
 
     # Redis / Celery — não usado no modo dev local
     redis_url: str = "redis://localhost:6379/0"

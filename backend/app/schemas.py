@@ -1,189 +1,222 @@
+"""
+Schemas Pydantic — validação de entrada e serialização de saída.
+"""
+
+from __future__ import annotations
 from datetime import datetime
-from typing import Optional
-
-from pydantic import BaseModel
-
-
-# ---------------------------------------------------------------------------
-# Grupo
-# ---------------------------------------------------------------------------
-
-class GrupoBase(BaseModel):
-    nome: str
-    limite: float
+from typing import Any
+from pydantic import BaseModel, field_validator
 
 
-class GrupoCreate(GrupoBase):
-    pass
+# ── Proposta ─────────────────────────────────────────────────────────────────
 
-
-class GrupoResponse(GrupoBase):
-    id: int
-
-    model_config = {"from_attributes": True}
-
-
-# ---------------------------------------------------------------------------
-# Corretor
-# ---------------------------------------------------------------------------
-
-class CorretorBase(BaseModel):
-    nome: str
-    cpf: str
-    grupo_id: Optional[int] = None
-
-
-class CorretorCreate(CorretorBase):
-    pass
-
-
-class CorretorResponse(CorretorBase):
-    id: int
-    grupo: Optional[GrupoResponse] = None
-
-    model_config = {"from_attributes": True}
-
-
-# ---------------------------------------------------------------------------
-# Convenio
-# ---------------------------------------------------------------------------
-
-class ConvenioBase(BaseModel):
-    nome: str
+class PropostaCreate(BaseModel):
+    proposta_id_externo: str
+    corretor_id: str | None = None
+    cpf_cliente: str
+    nome_cliente: str | None = None
+    uf_cliente: str | None = None
     banco: str
+    convenio: str | None = None
+    produto: str | None = None
+    valor: float
+    payload_original: dict[str, Any] | None = None
+
+    @field_validator("valor")
+    @classmethod
+    def valor_positivo(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("Valor deve ser positivo")
+        return v
+
+    @field_validator("cpf_cliente")
+    @classmethod
+    def cpf_apenas_digitos(cls, v: str) -> str:
+        digits = v.replace(".", "").replace("-", "").replace("/", "")
+        if not digits.isdigit() or len(digits) not in (11, 14):
+            raise ValueError("CPF/CNPJ inválido")
+        return digits
+
+
+class PropostaOut(BaseModel):
+    id: str
+    proposta_id_externo: str
+    corretor_id: str | None
+    cpf_cliente: str
+    nome_cliente: str | None
+    uf_cliente: str | None
+    banco: str
+    convenio: str | None
+    produto: str | None
+    valor: float
+    status: str
+    score_fraude: int | None
+    resultado_motor: str | None
+    decisao_detalhes: dict | None
+    tentativas: int
+    ultimo_erro: str | None
+    criado_em: datetime
+    atualizado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PropostaSummary(BaseModel):
+    total: int
+    enfileiradas: int
+    em_analise: int
+    aprovadas: int
+    reprovadas: int
+    bloqueadas: int
+    analise_manual: int
+    enviadas_banco: int
+    confirmadas_banco: int
+    erro: int
+
+
+# ── Regra Antifraude ─────────────────────────────────────────────────────────
+
+class RegraCreate(BaseModel):
+    nome: str
+    descricao: str | None = None
+    tipo: str
+    parametros: dict[str, Any]
+    peso_score: int = 0
+    bloqueante: bool = False
+    prioridade: int = 100
     ativo: bool = True
 
 
-class ConvenioCreate(ConvenioBase):
-    pass
+class RegraUpdate(BaseModel):
+    nome: str | None = None
+    descricao: str | None = None
+    parametros: dict[str, Any] | None = None
+    peso_score: int | None = None
+    bloqueante: bool | None = None
+    prioridade: int | None = None
+    ativo: bool | None = None
 
 
-class ConvenioResponse(ConvenioBase):
-    id: int
+class RegraOut(BaseModel):
+    id: str
+    nome: str
+    descricao: str | None
+    tipo: str
+    parametros: dict
+    peso_score: int
+    bloqueante: bool
+    prioridade: int
+    ativo: bool
+    versao: int
+    criado_em: datetime
+    atualizado_em: datetime
 
     model_config = {"from_attributes": True}
 
 
-# ---------------------------------------------------------------------------
-# Blacklist
-# ---------------------------------------------------------------------------
+# ── Corretor ─────────────────────────────────────────────────────────────────
 
-class BlacklistBase(BaseModel):
+class CorretorCreate(BaseModel):
+    nome: str
     cpf: str
-    motivo: str
+    codigo_externo: str | None = None
+    limite_valor_diario: float = 0.0
 
 
-class BlacklistCreate(BlacklistBase):
-    pass
-
-
-class BlacklistResponse(BlacklistBase):
-    id: int
+class CorretorOut(BaseModel):
+    id: str
+    nome: str
+    cpf: str
+    codigo_externo: str | None
+    limite_valor_diario: float
+    ativo: bool
     criado_em: datetime
 
     model_config = {"from_attributes": True}
 
 
-# ---------------------------------------------------------------------------
-# RegraGrupo
-# ---------------------------------------------------------------------------
+# ── Blacklist ─────────────────────────────────────────────────────────────────
 
-class RegraGrupoBase(BaseModel):
-    grupo_id: int
-    descricao: str
+class BlacklistAdd(BaseModel):
+    cpf: str
+    motivo: str
 
 
-class RegraGrupoCreate(RegraGrupoBase):
-    pass
-
-
-class RegraGrupoResponse(RegraGrupoBase):
-    id: int
+class BlacklistOut(BaseModel):
+    id: str
+    cpf: str
+    motivo: str
+    adicionado_por: str | None
+    criado_em: datetime
 
     model_config = {"from_attributes": True}
 
 
-# ---------------------------------------------------------------------------
-# Proposta
-# ---------------------------------------------------------------------------
+# ── Auditoria ─────────────────────────────────────────────────────────────────
 
-class PropostaBase(BaseModel):
-    cpf_cliente: str
-    banco: str
-    valor: float
-    corretor_id: Optional[int] = None
-    convenio: Optional[str] = None
-    observacao: Optional[str] = None
-
-
-class PropostaCreate(PropostaBase):
-    pass
-
-
-class PropostaResponse(PropostaBase):
-    id: int
-    status: str
-    data: datetime
-    corretor: Optional[CorretorResponse] = None
+class AuditoriaOut(BaseModel):
+    id: str
+    proposta_id: str
+    evento: str
+    dados: dict | None
+    usuario: str | None
+    ip_origem: str | None
+    timestamp: datetime
 
     model_config = {"from_attributes": True}
 
 
-class PropostaStatusUpdate(BaseModel):
-    status: str
-    observacao: Optional[str] = None
+# ── Auth / Usuário ────────────────────────────────────────────────────────────
+
+class UsuarioCreate(BaseModel):
+    email: str
+    username: str
+    nome: str
+    cargo: str | None = None
+    senha: str
+    perfil: str = "operador"
 
 
-# ---------------------------------------------------------------------------
-# Auth
-# ---------------------------------------------------------------------------
+class UsuarioUpdate(BaseModel):
+    nome: str | None = None
+    cargo: str | None = None
+    perfil: str | None = None
+    ativo: bool | None = None
+    senha: str | None = None
+
+
+class UsuarioOut(BaseModel):
+    id: str
+    email: str
+    username: str
+    nome: str
+    cargo: str | None
+    perfil: str
+    ativo: bool
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    identificador: str  # email OU username
+    senha: str
 
 
-class LoginResponse(BaseModel):
+class TokenResponse(BaseModel):
     access_token: str
-    username: str
-    nome: str
-    cargo: str
-    role: str
+    token_type: str = "bearer"
+    usuario: UsuarioOut
 
 
-class UserResponse(BaseModel):
-    id: int
-    username: str
-    email: Optional[str] = None
-    nome: str
-    cargo: str
-    role: str
-    ativo: bool
+# ── Titan ─────────────────────────────────────────────────────────────────────
 
-    model_config = {"from_attributes": True}
+class TitanStatusOut(BaseModel):
+    circuit_breaker: str
+    estado: str
 
 
-class UserCreate(BaseModel):
-    username: str
-    email: Optional[str] = None
-    password: str
-    nome: str
-    role: str = "OPERADOR"
+# ── Genérico ──────────────────────────────────────────────────────────────────
 
-
-class UserUpdate(BaseModel):
-    nome: Optional[str] = None
-    email: Optional[str] = None
-    cargo: Optional[str] = None
-    role: Optional[str] = None
-    password: Optional[str] = None
-
-
-# ---------------------------------------------------------------------------
-# Summary
-# ---------------------------------------------------------------------------
-
-class StatusCount(BaseModel):
-    status: str
-    quantidade: int
-    valor_total: float
+class Mensagem(BaseModel):
+    mensagem: str

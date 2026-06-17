@@ -56,3 +56,14 @@ test-results/
 # Uploads e arquivos temporários
 uploads/
 tmp/
+
+# Versão antiga (pode deletar manualmente)
+v2/
+
+# Backend
+backend/.env
+backend/antifraude_v2.db
+backend/-w
+
+# Frontend build
+frontend/.next/

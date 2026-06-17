@@ -1,17 +1,20 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-
-DATABASE_URL = "sqlite:///./antifraude.db"
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from app.core.config import settings
 
 engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
+    settings.database_url,
+    echo=settings.environment == "development",
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 def get_db():

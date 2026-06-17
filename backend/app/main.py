@@ -1,19 +1,30 @@
-from fastapi import Depends, FastAPI
+"""
+Aplicação FastAPI — ponto de entrada do backend V2.
+"""
+
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import engine
-from app import models
-from app.routers import propostas, corretores, grupos, regras, convenios, blacklist, auth, users
-from app.routers.auth import get_current_user
+from app.core.config import settings
+from app.core.logging import configurar_logs as configure_logging
+from app.database import engine, Base
+from app.routers import propostas, regras, titan, auth, bancos, usuarios
 
-# Cria todas as tabelas no banco ao iniciar
-models.Base.metadata.create_all(bind=engine)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    configure_logging()
+    # Cria tabelas no banco (Alembic faz isso em produção; aqui é para dev)
+    Base.metadata.create_all(bind=engine)
+    yield
+
 
 app = FastAPI(
-    title="Antifraude Unica Promotora",
-    description="Sistema de mesa de credito com engine de regras antifraude",
-    version="1.0.0",
-    redirect_slashes=False,
+    title="Antifraude API V2",
+    description="Sistema antifraude para análise de propostas de crédito",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -24,17 +35,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router, prefix="/auth", tags=["Autenticação"])
-_auth_dep = [Depends(get_current_user)]
-app.include_router(propostas.router, prefix="/propostas", tags=["Propostas"], dependencies=_auth_dep)
-app.include_router(corretores.router, prefix="/corretores", tags=["Corretores"], dependencies=_auth_dep)
-app.include_router(grupos.router, prefix="/grupos", tags=["Grupos"], dependencies=_auth_dep)
-app.include_router(regras.router, prefix="/regras", tags=["Regras"], dependencies=_auth_dep)
-app.include_router(convenios.router, prefix="/convenios", tags=["Convenios"], dependencies=_auth_dep)
-app.include_router(blacklist.router, prefix="/blacklist", tags=["Blacklist"], dependencies=_auth_dep)
-app.include_router(users.router, prefix="/users", tags=["Usuários"])
+# Routers
+app.include_router(auth.router)
+app.include_router(usuarios.router)
+app.include_router(propostas.router)
+app.include_router(regras.router)
+app.include_router(titan.router)
+app.include_router(bancos.router)
 
 
-@app.get("/", tags=["Root"])
-def root():
-    return {"status": "ok", "sistema": "Antifraude Unica Promotora"}
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": "2.0.0"}

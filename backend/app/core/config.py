@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     jwt_expiration_hours: int = 8
     access_token_expire_minutes: int = 60
 
+    # Storm API
+    storm_base_url: str = "https://openapi.stormfin.com.br"
+    storm_username: str = ""
+    storm_password: str = ""
+    storm_client_id: str = ""
+    storm_client_secret: str = ""  # deixar vazio se a aplicação for público (public client)
+    storm_timeout: int = 15
+    storm_max_retries: int = 3
+
     # Circuit Breaker
     circuit_breaker_failure_threshold: int = 5
     circuit_breaker_recovery_timeout: int = 60

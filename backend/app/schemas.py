@@ -114,27 +114,6 @@ class RegraOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── Corretor ─────────────────────────────────────────────────────────────────
-
-class CorretorCreate(BaseModel):
-    nome: str
-    cpf: str
-    codigo_externo: str | None = None
-    limite_valor_diario: float = 0.0
-
-
-class CorretorOut(BaseModel):
-    id: str
-    nome: str
-    cpf: str
-    codigo_externo: str | None
-    limite_valor_diario: float
-    ativo: bool
-    criado_em: datetime
-
-    model_config = {"from_attributes": True}
-
-
 # ── Blacklist ─────────────────────────────────────────────────────────────────
 
 class BlacklistAdd(BaseModel):
@@ -214,6 +193,288 @@ class TokenResponse(BaseModel):
 class TitanStatusOut(BaseModel):
     circuit_breaker: str
     estado: str
+
+
+# ── Corretor ─────────────────────────────────────────────────────────────────
+
+class CorretorCreate(BaseModel):
+    nome: str
+    cpf: str
+    email: str | None = None
+    telefone: str | None = None
+    codigo_externo: str | None = None
+    grupo_id: str | None = None
+    limite_valor_diario: float = 0.0
+
+
+class CorretorUpdate(BaseModel):
+    nome: str | None = None
+    email: str | None = None
+    telefone: str | None = None
+    codigo_externo: str | None = None
+    grupo_id: str | None = None
+    limite_valor_diario: float | None = None
+    ativo: bool | None = None
+
+
+class CorretorOut(BaseModel):
+    id: str
+    nome: str
+    cpf: str
+    email: str | None
+    telefone: str | None
+    codigo_externo: str | None
+    grupo_id: str | None
+    limite_valor_diario: float
+    ativo: bool
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ContatoCreate(BaseModel):
+    tipo: str  # EMAIL | TELEFONE
+    valor: str
+    principal: bool = False
+
+
+class ContatoOut(BaseModel):
+    id: str
+    corretor_id: str
+    tipo: str
+    valor: str
+    principal: bool
+    ativo: bool
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Grupo de Corretores ────────────────────────────────────────────────────────
+
+class GrupoCreate(BaseModel):
+    nome: str
+    descricao: str | None = None
+    limite_valor: float = 0.0
+
+
+class GrupoUpdate(BaseModel):
+    nome: str | None = None
+    descricao: str | None = None
+    limite_valor: float | None = None
+    ativo: bool | None = None
+
+
+class GrupoOut(BaseModel):
+    id: str
+    nome: str
+    descricao: str | None
+    limite_valor: float
+    ativo: bool
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Layout de Importação ───────────────────────────────────────────────────────
+
+class MapeamentoCreate(BaseModel):
+    coluna_origem: str
+    campo_destino: str
+    transformacao: str | None = None
+    obrigatorio: bool = False
+    valor_padrao: str | None = None
+    ordem: int = 0
+
+
+class MapeamentoOut(BaseModel):
+    id: str
+    layout_id: str
+    coluna_origem: str
+    campo_destino: str
+    transformacao: str | None
+    obrigatorio: bool
+    valor_padrao: str | None
+    ordem: int
+
+    model_config = {"from_attributes": True}
+
+
+class LayoutCreate(BaseModel):
+    nome: str
+    descricao: str | None = None
+    tipo: str  # PROPOSTA | CORRETOR
+    separador: str = ","
+    encoding: str = "utf-8"
+    tem_cabecalho: bool = True
+
+
+class LayoutUpdate(BaseModel):
+    nome: str | None = None
+    descricao: str | None = None
+    separador: str | None = None
+    encoding: str | None = None
+    tem_cabecalho: bool | None = None
+    ativo: bool | None = None
+
+
+class LayoutOut(BaseModel):
+    id: str
+    nome: str
+    descricao: str | None
+    tipo: str
+    separador: str
+    encoding: str
+    tem_cabecalho: bool
+    ativo: bool
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Importações ────────────────────────────────────────────────────────────────
+
+class ImportacaoOut(BaseModel):
+    id: str
+    arquivo_nome: str
+    total_linhas: int
+    processadas: int | None = None
+    sucesso: int
+    erro: int
+    status: str
+    log_erros: list | None
+    criado_por: str | None
+    criado_em: datetime
+    concluido_em: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+# ── Averbação ──────────────────────────────────────────────────────────────────
+
+class AverbacaoCreate(BaseModel):
+    banco: str
+    numero_operacao: str | None = None
+    observacao: str | None = None
+
+
+class AverbacaoUpdate(BaseModel):
+    status: str | None = None
+    numero_operacao: str | None = None
+    observacao: str | None = None
+
+
+class AverbacaoOut(BaseModel):
+    id: str
+    proposta_id: str
+    banco: str
+    numero_operacao: str | None
+    status: str
+    data_averbacao: datetime | None
+    resposta_banco: dict | None
+    observacao: str | None
+    criado_em: datetime
+    atualizado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Retorno de Banco ───────────────────────────────────────────────────────────
+
+class RetornoCreate(BaseModel):
+    proposta_id: str | None = None
+    banco: str
+    tipo_retorno: str
+    dados: dict | None = None
+    observacao: str | None = None
+
+
+class RetornoOut(BaseModel):
+    id: str
+    proposta_id: str | None
+    banco: str
+    tipo_retorno: str
+    dados: dict | None
+    processado: bool
+    observacao: str | None
+    criado_em: datetime
+    processado_em: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+# ── Pendência ──────────────────────────────────────────────────────────────────
+
+class PendenciaCreate(BaseModel):
+    proposta_id: str | None = None
+    tipo: str
+    descricao: str
+    responsavel_id: str | None = None
+    prazo: datetime | None = None
+
+
+class PendenciaUpdate(BaseModel):
+    descricao: str | None = None
+    responsavel_id: str | None = None
+    prazo: datetime | None = None
+    resolvida: bool | None = None
+    resolucao: str | None = None
+
+
+class PendenciaOut(BaseModel):
+    id: str
+    proposta_id: str | None
+    tipo: str
+    descricao: str
+    responsavel_id: str | None
+    prazo: datetime | None
+    resolvida: bool
+    resolucao: str | None
+    criado_em: datetime
+    resolvida_em: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+# ── Log de Acesso ──────────────────────────────────────────────────────────────
+
+class LogAcessoOut(BaseModel):
+    id: str
+    usuario_id: str | None
+    username: str | None
+    metodo: str
+    endpoint: str
+    ip: str | None
+    status_code: int
+    duracao_ms: int | None
+    timestamp: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Convênio ──────────────────────────────────────────────────────────────────
+
+class ConvenioCreate(BaseModel):
+    nome: str
+    banco: str | None = None
+    ativo: bool = True
+
+
+class ConvenioUpdate(BaseModel):
+    nome: str | None = None
+    banco: str | None = None
+    ativo: bool | None = None
+
+
+class ConvenioOut(BaseModel):
+    id: str
+    nome: str
+    banco: str | None
+    ativo: bool
+    auto_registrado: bool
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
 
 
 # ── Genérico ──────────────────────────────────────────────────────────────────

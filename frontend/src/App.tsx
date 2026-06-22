@@ -5,6 +5,13 @@ import PropostasPage from "./pages/PropostasPage";
 import RegrasPage from "./pages/RegrasPage";
 import BancosPage from "./pages/BancosPage";
 import UsuariosPage from "./pages/UsuariosPage";
+import StormPage from "./pages/StormPage";
+import CorretoresPage from "./pages/CorretoresPage";
+import GruposPage from "./pages/GruposPage";
+import ImportacoesPage from "./pages/ImportacoesPage";
+import PendenciasPage from "./pages/PendenciasPage";
+import LogsPage from "./pages/LogsPage";
+import RelatoriosPage from "./pages/RelatoriosPage";
 
 export default function App() {
   return (
@@ -16,6 +23,13 @@ export default function App() {
       <Route path="/regras" element={<RegrasPage />} />
       <Route path="/bancos" element={<BancosPage />} />
       <Route path="/usuarios" element={<UsuariosPage />} />
+      <Route path="/storm" element={<StormPage />} />
+      <Route path="/corretores" element={<CorretoresPage />} />
+      <Route path="/grupos" element={<GruposPage />} />
+      <Route path="/importacoes" element={<ImportacoesPage />} />
+      <Route path="/pendencias" element={<PendenciasPage />} />
+      <Route path="/logs" element={<LogsPage />} />
+      <Route path="/relatorios" element={<RelatoriosPage />} />
     </Routes>
   );
 }

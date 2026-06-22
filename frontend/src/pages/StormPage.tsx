@@ -1,0 +1,863 @@
+import { useState, useEffect, useCallback } from "react";
+import Layout from "../components/Layout";
+import {
+  getStormStatus,
+  resetarCircuitBreakerStorm,
+  getStormAntifraude,
+  getStormTiposRecusas,
+  getStormTiposPendencias,
+  aprovarContratoStorm,
+  recusarContratoStorm,
+  pendenciarContratoStorm,
+  reanalisarContratoStorm,
+  getStormContratos,
+  getStormHistoricoContrato,
+  getStormStatusContratos,
+  getStormClienteCpf,
+  getStormClienteTelefone,
+  getStormColaboradores,
+  getStormColaborador,
+  getStormBancos,
+  getStormOrgaos,
+  simularCLTStorm,
+  simularFGTSStorm,
+} from "../lib/api";
+
+// ── Tipos ─────────────────────────────────────────────────────────────────────
+
+type Tab = "antifraude" | "contratos" | "clientes" | "colaboradores" | "simulacoes" | "referencia";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "antifraude",   label: "Antifraude" },
+  { id: "contratos",    label: "Contratos" },
+  { id: "clientes",     label: "Clientes" },
+  { id: "colaboradores",label: "Colaboradores" },
+  { id: "simulacoes",   label: "Simulações" },
+  { id: "referencia",   label: "Referência" },
+];
+
+// ── Utilitários visuais ───────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyData = any;
+
+function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`rounded-xl p-4 ${className}`} style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+      {children}
+    </div>
+  );
+}
+
+function Badge({ label, color }: { label: string; color: "green" | "red" | "yellow" | "gray" | "blue" | "purple" }) {
+  const bg: Record<string, string> = { green: "rgba(34,197,94,0.15)", red: "rgba(220,38,38,0.15)", yellow: "rgba(234,179,8,0.15)", gray: "rgba(156,163,175,0.15)", blue: "rgba(59,130,246,0.15)", purple: "rgba(168,85,247,0.15)" };
+  const fg: Record<string, string> = { green: "#22c55e", red: "#DC2626", yellow: "#eab308", gray: "#9ca3af", blue: "#3b82f6", purple: "#a855f7" };
+  return (
+    <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: bg[color], color: fg[color] }}>{label}</span>
+  );
+}
+
+function Spinner() {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <div className="w-8 h-8 rounded-full border-2 animate-spin" style={{ borderColor: "#DC262620", borderTopColor: "#DC2626" }} />
+    </div>
+  );
+}
+
+function EmptyState({ msg }: { msg: string }) {
+  return <p className="text-center py-12 text-xs" style={{ color: "var(--text-muted)" }}>{msg}</p>;
+}
+
+function AlertErro({ msg }: { msg: string }) {
+  return <p className="text-xs font-semibold px-3 py-2 rounded-lg" style={{ backgroundColor: "rgba(220,38,38,0.08)", color: "#DC2626", border: "1px solid rgba(220,38,38,0.2)" }}>{msg}</p>;
+}
+
+function AlertOk({ msg }: { msg: string }) {
+  return <p className="text-xs font-semibold px-3 py-2 rounded-lg" style={{ backgroundColor: "rgba(34,197,94,0.08)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.2)" }}>{msg}</p>;
+}
+
+function Paginacao({ pagina, onPrev, onNext }: { pagina: number; onPrev: () => void; onNext: () => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <button onClick={onPrev} disabled={pagina === 1} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" style={{ backgroundColor: "var(--bg-mid)", color: pagina === 1 ? "var(--text-muted)" : "var(--text-primary)", opacity: pagina === 1 ? 0.5 : 1 }}>&#8249; Anterior</button>
+      <span className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)" }}>Página {pagina}</span>
+      <button onClick={onNext} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)" }}>Próxima &#8250;</button>
+    </div>
+  );
+}
+
+function normalize(data: AnyData, keys: string[]): AnyData[] {
+  if (Array.isArray(data)) return data;
+  for (const k of keys) if (Array.isArray(data?.[k])) return data[k];
+  return [];
+}
+
+function formatBRL(v: number | string | undefined) {
+  const n = Number(v);
+  if (isNaN(n)) return "—";
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+// ── Aba Antifraude ────────────────────────────────────────────────────────────
+
+function AbaAntifraude() {
+  const [contratos, setContratos] = useState<AnyData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [esteira, setEsteira] = useState("antifraude");
+  const [pagina, setPagina] = useState(1);
+  const [tiposRecusas, setTiposRecusas] = useState<AnyData[]>([]);
+  const [tiposPendencias, setTiposPendencias] = useState<AnyData[]>([]);
+  const [acao, setAcao] = useState<{ tipo: string; contratoId: number } | null>(null);
+  const [form, setForm] = useState({ tipo_id: "", observacao: "" });
+  const [msg, setMsg] = useState("");
+  const [erro, setErro] = useState("");
+
+  const buscar = useCallback(async () => {
+    setLoading(true); setErro("");
+    try {
+      const data = await getStormAntifraude(esteira, pagina);
+      setContratos(normalize(data, ["contratos", "items", "data"]));
+    } catch (e: AnyData) {
+      setErro(e?.response?.data?.detail ?? "Erro ao buscar contratos antifraude");
+    } finally { setLoading(false); }
+  }, [esteira, pagina]);
+
+  useEffect(() => { buscar(); }, [buscar]);
+
+  useEffect(() => {
+    Promise.all([getStormTiposRecusas(), getStormTiposPendencias()])
+      .then(([r, p]) => { setTiposRecusas(normalize(r, ["tipos"])); setTiposPendencias(normalize(p, ["tipos"])); })
+      .catch(() => {});
+  }, []);
+
+  const executar = async () => {
+    if (!acao) return;
+    setMsg(""); setErro("");
+    try {
+      if (acao.tipo === "aprovar") await aprovarContratoStorm(acao.contratoId);
+      else if (acao.tipo === "recusar") await recusarContratoStorm(acao.contratoId, { tipo_recusa_id: Number(form.tipo_id), observacao: form.observacao || undefined });
+      else if (acao.tipo === "pendenciar") await pendenciarContratoStorm(acao.contratoId, { tipo_pendencia_id: Number(form.tipo_id), observacao: form.observacao || undefined });
+      else if (acao.tipo === "reanalisar") await reanalisarContratoStorm(acao.contratoId, { observacao: form.observacao });
+      const nomes: Record<string, string> = { aprovar: "aprovado", recusar: "recusado", pendenciar: "pendenciado", reanalisar: "enviado para reanálise" };
+      setMsg(`Contrato ${nomes[acao.tipo]} com sucesso.`);
+      setAcao(null); setForm({ tipo_id: "", observacao: "" }); buscar();
+    } catch (e: AnyData) {
+      setErro(e?.response?.data?.detail ?? "Erro ao executar ação.");
+    }
+  };
+
+  const COR_ACAO: Record<string, { bg: string; color: string }> = {
+    aprovar:    { bg: "rgba(34,197,94,0.12)",  color: "#22c55e" },
+    recusar:    { bg: "rgba(220,38,38,0.12)",  color: "#DC2626" },
+    pendenciar: { bg: "rgba(234,179,8,0.12)",  color: "#eab308" },
+    reanalisar: { bg: "rgba(59,130,246,0.12)", color: "#3b82f6" },
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+        <input value={esteira} onChange={(e) => setEsteira(e.target.value)} placeholder="Fila (ex: antifraude)" className="px-3 py-2 rounded-lg text-xs flex-1 min-w-32" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+        <button onClick={() => { setPagina(1); buscar(); }} className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Buscar</button>
+        <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => setPagina((p) => p + 1)} />
+      </div>
+
+      {msg && <AlertOk msg={msg} />}
+      {erro && <AlertErro msg={erro} />}
+
+      {loading ? <Spinner /> : contratos.length === 0 ? <EmptyState msg="Nenhum contrato na fila de antifraude." /> : (
+        <div className="space-y-3">
+          {contratos.map((c: AnyData, i: number) => (
+            <Card key={c.id ?? c.ct_id ?? i}>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="space-y-1 min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-black" style={{ color: "var(--text-primary)" }}>
+                      {c.ff ?? c.codigo ?? `#${c.id ?? c.ct_id}`}
+                    </p>
+                    {c.status && <Badge label={String(c.status)} color="blue" />}
+                    {c.esteira && <Badge label={String(c.esteira)} color="purple" />}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-0.5">
+                    {[
+                      ["CPF", c.cpf_cliente ?? c.cpf],
+                      ["Cliente", c.cliente ?? c.cl_nome ?? c.nome_cliente],
+                      ["Banco", c.banco ?? c.ba_nome],
+                      ["Convênio", c.convenio ?? c.co_nome],
+                      ["Valor", formatBRL(c.valor_negociado ?? c.valor)],
+                      ["Produto", c.produto ?? c.pr_nome],
+                      ["Prazo", c.prazo ? `${c.prazo}x` : undefined],
+                      ["Parcela", formatBRL(c.valor_parcela)],
+                    ].filter(([, v]) => v != null && v !== "—").map(([k, v]) => (
+                      <div key={k as string}>
+                        <span className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{k}</span>
+                        <p className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{v as string}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {c.observacao && <p className="text-xs italic mt-1" style={{ color: "var(--text-muted)" }}>{c.observacao}</p>}
+                </div>
+                <div className="flex flex-wrap gap-2 flex-shrink-0">
+                  {[
+                    { tipo: "aprovar",    label: "Aprovar" },
+                    { tipo: "recusar",    label: "Recusar" },
+                    { tipo: "pendenciar", label: "Pendenciar" },
+                    { tipo: "reanalisar", label: "Reanalisar" },
+                  ].map(({ tipo, label }) => (
+                    <button key={tipo} onClick={() => { setAcao({ tipo, contratoId: c.id ?? c.ct_id }); setForm({ tipo_id: "", observacao: "" }); }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                      style={COR_ACAO[tipo]}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Modal */}
+      {acao && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.65)" }}>
+          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+            <h3 className="text-sm font-black uppercase" style={{ color: "var(--text-primary)" }}>
+              {acao.tipo.charAt(0).toUpperCase() + acao.tipo.slice(1)} — Contrato #{acao.contratoId}
+            </h3>
+            {acao.tipo === "recusar" && (
+              <div>
+                <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--text-muted)" }}>Motivo da recusa</label>
+                <select value={form.tipo_id} onChange={(e) => setForm((f) => ({ ...f, tipo_id: e.target.value }))} className="w-full px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>
+                  <option value="">Selecione...</option>
+                  {tiposRecusas.map((t: AnyData) => <option key={t.id} value={t.id}>{t.descricao ?? t.nome}</option>)}
+                </select>
+              </div>
+            )}
+            {acao.tipo === "pendenciar" && (
+              <div>
+                <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--text-muted)" }}>Tipo de pendência</label>
+                <select value={form.tipo_id} onChange={(e) => setForm((f) => ({ ...f, tipo_id: e.target.value }))} className="w-full px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>
+                  <option value="">Selecione...</option>
+                  {tiposPendencias.map((t: AnyData) => <option key={t.id} value={t.id}>{t.descricao ?? t.nome}</option>)}
+                </select>
+              </div>
+            )}
+            {acao.tipo !== "aprovar" && (
+              <div>
+                <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--text-muted)" }}>
+                  Observação {acao.tipo === "reanalisar" ? "(obrigatória)" : "(opcional)"}
+                </label>
+                <textarea value={form.observacao} onChange={(e) => setForm((f) => ({ ...f, observacao: e.target.value }))} rows={3} className="w-full px-3 py-2 rounded-lg text-xs resize-none" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+              </div>
+            )}
+            {acao.tipo === "aprovar" && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Confirmar aprovação do contrato #{acao.contratoId}?</p>}
+            {erro && <AlertErro msg={erro} />}
+            <div className="flex gap-3">
+              <button onClick={() => setAcao(null)} className="flex-1 py-2 rounded-lg text-xs font-semibold" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)" }}>Cancelar</button>
+              <button onClick={executar} className="flex-1 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Aba Contratos ─────────────────────────────────────────────────────────────
+
+function AbaContratos() {
+  const [contratos, setContratos] = useState<AnyData[]>([]);
+  const [statusList, setStatusList] = useState<AnyData[]>([]);
+  const [bancos, setBancos] = useState<AnyData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [cpf, setCpf] = useState("");
+  const [ff, setFf] = useState("");
+  const [idBanco, setIdBanco] = useState("");
+  const [idStatus, setIdStatus] = useState("");
+  const [pagina, setPagina] = useState(1);
+  const [historico, setHistorico] = useState<AnyData[] | null>(null);
+  const [ffHistorico, setFfHistorico] = useState("");
+  const [erro, setErro] = useState("");
+
+  useEffect(() => {
+    Promise.all([getStormStatusContratos(), getStormBancos()])
+      .then(([s, b]) => {
+        setStatusList(normalize(s, ["status", "items"]));
+        setBancos(normalize(b, ["bancos", "items"]));
+      }).catch(() => {});
+  }, []);
+
+  const buscar = async () => {
+    setLoading(true); setErro(""); setHistorico(null);
+    try {
+      const data = await getStormContratos({ cpf: cpf || undefined, ff: ff || undefined, id_banco: idBanco ? Number(idBanco) : undefined, id_status: idStatus ? Number(idStatus) : undefined, pagina });
+      setContratos(normalize(data, ["contratos", "items", "data"]));
+    } catch (e: AnyData) {
+      setErro(e?.response?.data?.detail ?? "Erro ao buscar contratos");
+    } finally { setLoading(false); }
+  };
+
+  const verHistorico = async (ffCode: string) => {
+    setFfHistorico(ffCode);
+    try {
+      const data = await getStormHistoricoContrato(ffCode);
+      setHistorico(normalize(data, ["historico", "items"]));
+    } catch { setHistorico([]); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+        <div>
+          <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>CPF</label>
+          <input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="000.000.000-00" className="w-full px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Código FF</label>
+          <input value={ff} onChange={(e) => setFf(e.target.value)} placeholder="FF000000" className="w-full px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Banco</label>
+          <select value={idBanco} onChange={(e) => setIdBanco(e.target.value)} className="w-full px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>
+            <option value="">Todos</option>
+            {bancos.map((b: AnyData) => <option key={b.ba_id ?? b.id} value={b.ba_id ?? b.id}>{b.ba_nome ?? b.nome}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Status</label>
+          <select value={idStatus} onChange={(e) => setIdStatus(e.target.value)} className="w-full px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>
+            <option value="">Todos</option>
+            {statusList.map((s: AnyData) => <option key={s.id ?? s.co_id} value={s.id ?? s.co_id}>{s.descricao ?? s.nome ?? s.status}</option>)}
+          </select>
+        </div>
+        <div className="col-span-2 sm:col-span-4 flex items-center justify-between">
+          <button onClick={() => { setPagina(1); buscar(); }} className="px-5 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Buscar contratos</button>
+          <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => { setPagina((p) => p + 1); buscar(); }} />
+        </div>
+      </div>
+
+      {erro && <AlertErro msg={erro} />}
+      {loading ? <Spinner /> : contratos.length === 0 ? <EmptyState msg="Use os filtros para buscar contratos." /> : (
+        <div className="rounded-xl overflow-hidden" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+          <table className="w-full text-xs">
+            <thead>
+              <tr style={{ backgroundColor: "var(--bg-mid)", borderBottom: "1px solid var(--border)" }}>
+                {["FF/Código", "Cliente", "CPF", "Banco", "Convênio", "Valor", "Status", ""].map((h) => (
+                  <th key={h} className="px-3 py-3 text-left font-bold uppercase text-[10px]" style={{ color: "var(--text-muted)" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {contratos.map((c: AnyData, i: number) => (
+                <tr key={c.ct_id ?? c.id ?? i} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td className="px-3 py-2.5 font-mono font-bold" style={{ color: "#DC2626" }}>{c.ff ?? c.codigo ?? `#${c.ct_id ?? c.id}`}</td>
+                  <td className="px-3 py-2.5 font-medium" style={{ color: "var(--text-primary)" }}>{c.cliente ?? c.cl_nome ?? "—"}</td>
+                  <td className="px-3 py-2.5 font-mono" style={{ color: "var(--text-muted)" }}>{c.cpf_cliente ?? c.cpf ?? "—"}</td>
+                  <td className="px-3 py-2.5" style={{ color: "var(--text-muted)" }}>{c.banco ?? c.ba_nome ?? "—"}</td>
+                  <td className="px-3 py-2.5" style={{ color: "var(--text-muted)" }}>{c.convenio ?? c.co_nome ?? "—"}</td>
+                  <td className="px-3 py-2.5 font-bold" style={{ color: "var(--text-primary)" }}>{formatBRL(c.valor_negociado ?? c.valor)}</td>
+                  <td className="px-3 py-2.5">
+                    {c.status ? <Badge label={String(c.status)} color="blue" /> : "—"}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {(c.ff || c.codigo) && (
+                      <button onClick={() => verHistorico(c.ff ?? c.codigo)} className="px-2 py-1 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(59,130,246,0.12)", color: "#3b82f6" }}>Histórico</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modal histórico */}
+      {historico !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.65)" }}>
+          <div className="w-full max-w-lg rounded-2xl p-6 shadow-2xl max-h-[80vh] overflow-y-auto" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-sm font-black" style={{ color: "var(--text-primary)" }}>Histórico — {ffHistorico}</h3>
+              <button onClick={() => setHistorico(null)} className="text-xs px-3 py-1.5 rounded-lg" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)" }}>Fechar</button>
+            </div>
+            {historico.length === 0 ? <EmptyState msg="Sem histórico disponível." /> : (
+              <div className="space-y-2">
+                {historico.map((h: AnyData, i: number) => (
+                  <div key={i} className="p-3 rounded-xl" style={{ backgroundColor: "var(--bg-mid)" }}>
+                    <p className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>{h.descricao ?? h.status ?? h.acao ?? h.evento ?? JSON.stringify(h).slice(0, 80)}</p>
+                    {h.data && <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{h.data}</p>}
+                    {h.usuario && <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Por: {h.usuario}</p>}
+                    {h.observacao && <p className="text-[10px] italic" style={{ color: "var(--text-muted)" }}>{h.observacao}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Aba Clientes ──────────────────────────────────────────────────────────────
+
+function AbaClientes() {
+  const [tipoBusca, setTipoBusca] = useState<"cpf" | "telefone">("cpf");
+  const [valor, setValor] = useState("");
+  const [cliente, setCliente] = useState<AnyData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const buscar = async () => {
+    if (!valor.trim()) return;
+    setLoading(true); setErro(""); setCliente(null);
+    try {
+      const data = tipoBusca === "cpf" ? await getStormClienteCpf(valor.replace(/\D/g, "")) : await getStormClienteTelefone(valor.replace(/\D/g, ""));
+      setCliente(data);
+    } catch (e: AnyData) {
+      setErro(e?.response?.data?.detail ?? "Cliente não encontrado");
+    } finally { setLoading(false); }
+  };
+
+  const info = (label: string, val: AnyData) => val != null && val !== "" && (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{label}</span>
+      <span className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{String(val)}</span>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <div className="p-4 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+        <div className="flex gap-2 mb-3">
+          {(["cpf", "telefone"] as const).map((t) => (
+            <button key={t} onClick={() => { setTipoBusca(t); setValor(""); setCliente(null); setErro(""); }}
+              className="px-4 py-2 rounded-lg text-xs font-bold uppercase"
+              style={{ backgroundColor: tipoBusca === t ? "#DC2626" : "var(--bg-mid)", color: tipoBusca === t ? "#fff" : "var(--text-muted)" }}
+            >{t === "cpf" ? "Por CPF" : "Por Telefone"}</button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={valor}
+            onChange={(e) => setValor(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && buscar()}
+            placeholder={tipoBusca === "cpf" ? "000.000.000-00" : "(11) 99999-9999"}
+            className="flex-1 px-3 py-2 rounded-lg text-sm"
+            style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+          />
+          <button onClick={buscar} disabled={loading} className="px-5 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626", opacity: loading ? 0.7 : 1 }}>
+            {loading ? "Buscando..." : "Buscar"}
+          </button>
+        </div>
+      </div>
+
+      {erro && <AlertErro msg={erro} />}
+
+      {cliente && (
+        <div className="space-y-4">
+          {/* Dados pessoais */}
+          <Card>
+            <p className="text-xs font-black uppercase mb-3" style={{ color: "#DC2626" }}>Dados do Cliente</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {info("Nome", cliente.nome ?? cliente.cl_nome)}
+              {info("CPF", cliente.cpf ?? cliente.cl_cpf)}
+              {info("Data de Nascimento", cliente.data_nascimento ?? cliente.dt_nascimento)}
+              {info("Telefone", cliente.telefone ?? cliente.cl_telefone)}
+              {info("E-mail", cliente.email ?? cliente.cl_email)}
+              {info("Sexo", cliente.sexo ?? cliente.cl_sexo)}
+              {info("Cidade", cliente.cidade ?? cliente.cl_cidade)}
+              {info("UF", cliente.uf ?? cliente.cl_uf)}
+              {info("Matrícula", cliente.matricula ?? cliente.cl_matricula)}
+              {info("Espécie/Benefício", cliente.especie ?? cliente.cl_especie)}
+              {info("Renda", formatBRL(cliente.renda ?? cliente.cl_renda))}
+              {info("Margem Disponível", formatBRL(cliente.margem ?? cliente.cl_margem))}
+            </div>
+          </Card>
+
+          {/* Contratos do cliente */}
+          {(cliente.contratos ?? cliente.ct_lista ?? []).length > 0 && (
+            <Card>
+              <p className="text-xs font-black uppercase mb-3" style={{ color: "#DC2626" }}>Contratos</p>
+              <div className="space-y-2">
+                {(cliente.contratos ?? cliente.ct_lista).map((ct: AnyData, i: number) => (
+                  <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ backgroundColor: "var(--bg-mid)" }}>
+                    <div>
+                      <p className="text-xs font-bold font-mono" style={{ color: "#DC2626" }}>{ct.ff ?? ct.codigo ?? `#${ct.id}`}</p>
+                      <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{ct.banco ?? ct.ba_nome} — {ct.status}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>{formatBRL(ct.valor_negociado ?? ct.valor)}</p>
+                      {ct.valor_parcela && <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{formatBRL(ct.valor_parcela)}/mês</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* JSON bruto se tiver campos não mapeados */}
+          <details className="rounded-xl overflow-hidden" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+            <summary className="px-4 py-3 text-xs font-semibold cursor-pointer" style={{ color: "var(--text-muted)" }}>Ver resposta completa da Storm</summary>
+            <pre className="px-4 pb-4 text-[10px] overflow-auto max-h-64 whitespace-pre-wrap" style={{ color: "var(--text-muted)" }}>
+              {JSON.stringify(cliente, null, 2)}
+            </pre>
+          </details>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Aba Colaboradores ─────────────────────────────────────────────────────────
+
+function AbaColaboradores() {
+  const [colaboradores, setColaboradores] = useState<AnyData[]>([]);
+  const [detalhe, setDetalhe] = useState<AnyData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadingDetalhe, setLoadingDetalhe] = useState(false);
+  const [busca, setBusca] = useState("");
+  const [pagina, setPagina] = useState(1);
+  const [erro, setErro] = useState("");
+
+  const buscar = useCallback(async () => {
+    setLoading(true); setErro("");
+    try {
+      const data = await getStormColaboradores({ pagina, usuario: busca || undefined });
+      setColaboradores(normalize(data, ["colaboradores", "operadores", "items"]));
+    } catch (e: AnyData) {
+      setErro(e?.response?.data?.detail ?? "Erro ao buscar colaboradores");
+    } finally { setLoading(false); }
+  }, [pagina, busca]);
+
+  useEffect(() => { buscar(); }, [buscar]);
+
+  const verDetalhe = async (id: number) => {
+    setDetalhe(null); setLoadingDetalhe(true);
+    try { setDetalhe(await getStormColaborador(id)); }
+    catch { setDetalhe({}); }
+    finally { setLoadingDetalhe(false); }
+  };
+
+  const statusColor = (s: string): "green" | "gray" => (s?.toLowerCase() === "ativo" ? "green" : "gray");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+        <input value={busca} onChange={(e) => setBusca(e.target.value)} onKeyDown={(e) => e.key === "Enter" && buscar()} placeholder="Buscar por usuário ou nome..." className="flex-1 min-w-40 px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+        <button onClick={() => { setPagina(1); buscar(); }} className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Buscar</button>
+        <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => setPagina((p) => p + 1)} />
+      </div>
+
+      {erro && <AlertErro msg={erro} />}
+      {loading ? <Spinner /> : colaboradores.length === 0 ? <EmptyState msg="Nenhum colaborador encontrado." /> : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {colaboradores.map((c: AnyData, i: number) => (
+            <Card key={c.op_id ?? c.id ?? i} className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-black text-white flex-shrink-0" style={{ backgroundColor: "#DC2626" }}>
+                {(c.op_nome ?? c.nome ?? c.usuario ?? "?")[0]?.toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold truncate" style={{ color: "var(--text-primary)" }}>{c.op_nome ?? c.nome ?? "—"}</p>
+                <p className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>{c.op_usuario ?? c.usuario ?? "—"}</p>
+                <p className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>{c.op_email ?? c.email ?? ""}</p>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {c.status_usuario && <Badge label={c.status_usuario} color={statusColor(c.status_usuario)} />}
+                  {c.privilegio && <Badge label={c.privilegio} color="blue" />}
+                  {c.perfil && <Badge label={c.perfil} color="purple" />}
+                </div>
+                <button onClick={() => verDetalhe(c.op_id ?? c.id)} className="text-[10px] mt-2 font-semibold" style={{ color: "#3b82f6" }}>Ver detalhes</button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Modal detalhe colaborador */}
+      {(detalhe !== null || loadingDetalhe) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.65)" }}>
+          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+            {loadingDetalhe ? <Spinner /> : (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-black" style={{ color: "var(--text-primary)" }}>Detalhe do Colaborador</h3>
+                  <button onClick={() => setDetalhe(null)} className="text-xs px-3 py-1.5 rounded-lg" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)" }}>Fechar</button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {Object.entries(detalhe ?? {}).filter(([, v]) => v != null && typeof v !== "object").map(([k, v]) => (
+                    <div key={k}>
+                      <p className="text-[10px] font-bold uppercase" style={{ color: "var(--text-muted)" }}>{k.replace(/_/g, " ")}</p>
+                      <p className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{String(v)}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Aba Simulações ────────────────────────────────────────────────────────────
+
+function AbaSimulacoes() {
+  const [tipo, setTipo] = useState<"clt" | "fgts">("clt");
+  const [cpf, setCpf] = useState("");
+  const [bancoId, setBancoId] = useState("");
+  const [valorSolicitado, setValorSolicitado] = useState("");
+  const [matricula, setMatricula] = useState("");
+  const [bancos, setBancos] = useState<AnyData[]>([]);
+  const [resultado, setResultado] = useState<AnyData>(null);
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState("");
+
+  useEffect(() => {
+    getStormBancos().then((d: AnyData) => setBancos(normalize(d, ["bancos", "items"]))).catch(() => {});
+  }, []);
+
+  const simular = async () => {
+    if (!cpf || !bancoId) { setErro("CPF e banco são obrigatórios."); return; }
+    setLoading(true); setErro(""); setResultado(null);
+    try {
+      const data = tipo === "clt"
+        ? await simularCLTStorm(cpf.replace(/\D/g, ""), Number(bancoId), valorSolicitado ? Number(valorSolicitado) : undefined, matricula || undefined)
+        : await simularFGTSStorm(cpf.replace(/\D/g, ""), Number(bancoId));
+      setResultado(data);
+    } catch (e: AnyData) {
+      setErro(e?.response?.data?.detail ?? "Erro ao realizar simulação");
+    } finally { setLoading(false); }
+  };
+
+  const exibir = (obj: AnyData, profundidade = 0): React.ReactNode => {
+    if (!obj || typeof obj !== "object") return null;
+    return Object.entries(obj).map(([k, v]) => {
+      if (typeof v === "object" && v !== null && profundidade < 2) {
+        return (
+          <div key={k} className="mt-2">
+            <p className="text-[10px] font-black uppercase mb-1" style={{ color: "#DC2626" }}>{k.replace(/_/g, " ")}</p>
+            <div className="pl-3 border-l-2" style={{ borderColor: "var(--border)" }}>{exibir(v, profundidade + 1)}</div>
+          </div>
+        );
+      }
+      if (v == null || v === "") return null;
+      return (
+        <div key={k} className="flex justify-between items-baseline py-1" style={{ borderBottom: "1px solid var(--border)" }}>
+          <span className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{k.replace(/_/g, " ")}</span>
+          <span className="text-xs font-medium ml-4 text-right" style={{ color: "var(--text-primary)" }}>{String(v)}</span>
+        </div>
+      );
+    });
+  };
+
+  return (
+    <div className="space-y-4 max-w-xl">
+      <div className="flex gap-2">
+        {(["clt", "fgts"] as const).map((t) => (
+          <button key={t} onClick={() => { setTipo(t); setResultado(null); setErro(""); }}
+            className="px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-widest"
+            style={{ backgroundColor: tipo === t ? "#DC2626" : "var(--bg-mid)", color: tipo === t ? "#fff" : "var(--text-muted)" }}
+          >{t === "clt" ? "Consignado CLT" : "FGTS"}</button>
+        ))}
+      </div>
+
+      <Card>
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>CPF do Cliente</label>
+            <input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="000.000.000-00" className="w-full px-3 py-2 rounded-lg text-sm" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Banco</label>
+            <select value={bancoId} onChange={(e) => setBancoId(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>
+              <option value="">Selecione o banco</option>
+              {bancos.map((b: AnyData) => <option key={b.ba_id ?? b.id} value={b.ba_id ?? b.id}>{b.ba_nome ?? b.nome}</option>)}
+            </select>
+          </div>
+          {tipo === "clt" && (
+            <>
+              <div>
+                <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Valor Solicitado (opcional)</label>
+                <input value={valorSolicitado} onChange={(e) => setValorSolicitado(e.target.value)} type="number" placeholder="R$ 0,00" className="w-full px-3 py-2 rounded-lg text-sm" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Matrícula (opcional)</label>
+                <input value={matricula} onChange={(e) => setMatricula(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+              </div>
+            </>
+          )}
+          <button onClick={simular} disabled={loading} className="w-full py-3 rounded-xl text-sm font-black text-white uppercase tracking-wide" style={{ backgroundColor: "#DC2626", opacity: loading ? 0.7 : 1 }}>
+            {loading ? "Simulando..." : `Simular ${tipo.toUpperCase()}`}
+          </button>
+        </div>
+      </Card>
+
+      {erro && <AlertErro msg={erro} />}
+      {resultado && (
+        <Card>
+          <p className="text-xs font-black uppercase mb-3" style={{ color: "#DC2626" }}>Resultado da Simulação</p>
+          <div>{exibir(resultado)}</div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ── Aba Referência (Bancos + Órgãos) ─────────────────────────────────────────
+
+function AbaReferencia() {
+  const [bancos, setBancos] = useState<AnyData[]>([]);
+  const [orgaos, setOrgaos] = useState<AnyData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState("");
+  const [sub, setSub] = useState<"bancos" | "orgaos">("bancos");
+
+  useEffect(() => {
+    Promise.all([getStormBancos(), getStormOrgaos()])
+      .then(([b, o]) => { setBancos(normalize(b, ["bancos", "items"])); setOrgaos(normalize(o, ["orgaos", "items"])); })
+      .catch((e: AnyData) => setErro(e?.response?.data?.detail ?? "Erro ao carregar referências"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const lista = sub === "bancos" ? bancos : orgaos;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        {(["bancos", "orgaos"] as const).map((s) => (
+          <button key={s} onClick={() => setSub(s)}
+            className="px-4 py-2 rounded-lg text-xs font-bold uppercase"
+            style={{ backgroundColor: sub === s ? "#DC2626" : "var(--bg-mid)", color: sub === s ? "#fff" : "var(--text-muted)" }}
+          >{s === "bancos" ? "Bancos" : "Órgãos / Convênios"}</button>
+        ))}
+      </div>
+
+      {erro && <AlertErro msg={erro} />}
+      {loading ? <Spinner /> : lista.length === 0 ? <EmptyState msg={`Nenhum ${sub} retornado pela Storm.`} /> : (
+        <div className="rounded-xl overflow-hidden" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+          <table className="w-full text-xs">
+            <thead>
+              <tr style={{ backgroundColor: "var(--bg-mid)", borderBottom: "1px solid var(--border)" }}>
+                <th className="px-4 py-3 text-left font-bold uppercase text-[10px]" style={{ color: "var(--text-muted)" }}>ID</th>
+                <th className="px-4 py-3 text-left font-bold uppercase text-[10px]" style={{ color: "var(--text-muted)" }}>Nome</th>
+                {sub === "bancos" && <th className="px-4 py-3 text-left font-bold uppercase text-[10px]" style={{ color: "var(--text-muted)" }}>Código</th>}
+                {sub === "orgaos" && <th className="px-4 py-3 text-left font-bold uppercase text-[10px]" style={{ color: "var(--text-muted)" }}>Sigla / Tipo</th>}
+                <th className="px-4 py-3 text-left font-bold uppercase text-[10px]" style={{ color: "var(--text-muted)" }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lista.map((item: AnyData, i: number) => (
+                <tr key={item.ba_id ?? item.or_id ?? item.id ?? i} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td className="px-4 py-2.5 font-mono font-bold" style={{ color: "#DC2626" }}>{item.ba_id ?? item.or_id ?? item.id ?? i + 1}</td>
+                  <td className="px-4 py-2.5 font-medium" style={{ color: "var(--text-primary)" }}>{item.ba_nome ?? item.or_nome ?? item.nome ?? "—"}</td>
+                  {sub === "bancos" && <td className="px-4 py-2.5 font-mono" style={{ color: "var(--text-muted)" }}>{item.ba_codigo ?? item.codigo ?? "—"}</td>}
+                  {sub === "orgaos" && <td className="px-4 py-2.5" style={{ color: "var(--text-muted)" }}>{item.or_sigla ?? item.sigla ?? item.tipo ?? "—"}</td>}
+                  <td className="px-4 py-2.5">
+                    {item.status || item.ativo != null ? (
+                      <Badge label={item.status ?? (item.ativo ? "Ativo" : "Inativo")} color={item.status === "ativo" || item.ativo ? "green" : "gray"} />
+                    ) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Página principal ──────────────────────────────────────────────────────────
+
+export default function StormPage() {
+  const [tab, setTab] = useState<Tab>("antifraude");
+  const [status, setStatus] = useState<AnyData>(null);
+  const [resetando, setResetando] = useState(false);
+
+  useEffect(() => { getStormStatus().then(setStatus).catch(() => {}); }, []);
+
+  const resetarCB = async () => {
+    setResetando(true);
+    try { await resetarCircuitBreakerStorm(); getStormStatus().then(setStatus); }
+    finally { setResetando(false); }
+  };
+
+  const cbEstado = status?.estado;
+  const cbCor = cbEstado === "CLOSED" ? "#22c55e" : cbEstado === "OPEN" ? "#DC2626" : "#eab308";
+
+  return (
+    <Layout>
+      <div className="space-y-5">
+        {/* Cabeçalho */}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-black" style={{ color: "var(--text-primary)" }}>Storm Tecnologia</h1>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest" style={{ backgroundColor: "rgba(59,130,246,0.12)", color: "#3b82f6" }}>Colaborador</span>
+            </div>
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+              Integração completa — antifraude, contratos, clientes, colaboradores, simulações e referência.
+            </p>
+          </div>
+
+          {/* Status técnico */}
+          {status && (
+            <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cbCor }} />
+                <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>
+                  CB: <span style={{ color: cbCor }}>{cbEstado}</span>
+                </span>
+              </div>
+              <div className="w-px h-4" style={{ backgroundColor: "var(--border)" }} />
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: status.token_ativo ? "#22c55e" : "#6b7280" }} />
+                <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  Token: {status.token_ativo ? "ativo" : "sem token"}
+                </span>
+              </div>
+              {status.token_expira_em && (
+                <>
+                  <div className="w-px h-4" style={{ backgroundColor: "var(--border)" }} />
+                  <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                    Expira: {new Date(status.token_expira_em).toLocaleTimeString("pt-BR")}
+                  </span>
+                </>
+              )}
+              {cbEstado === "OPEN" && (
+                <button onClick={resetarCB} disabled={resetando} className="ml-2 px-3 py-1 rounded-lg text-xs font-semibold" style={{ backgroundColor: "rgba(234,179,8,0.12)", color: "#eab308" }}>
+                  {resetando ? "Resetando..." : "Resetar CB"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {!status?.credenciais_configuradas && status && (
+          <div className="px-4 py-3 rounded-xl text-xs font-semibold" style={{ backgroundColor: "rgba(234,179,8,0.08)", color: "#eab308", border: "1px solid rgba(234,179,8,0.25)" }}>
+            Configure STORM_USERNAME, STORM_PASSWORD e STORM_CLIENT_ID no .env para ativar a integração.
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div className="flex flex-wrap gap-0.5" style={{ borderBottom: "1px solid var(--border)" }}>
+          {TABS.map(({ id, label }) => (
+            <button key={id} onClick={() => setTab(id)}
+              className="px-4 py-2.5 text-xs font-semibold rounded-t-lg transition-all"
+              style={{ color: tab === id ? "#DC2626" : "var(--text-muted)", backgroundColor: tab === id ? "rgba(220,38,38,0.07)" : "transparent", borderBottom: tab === id ? "2px solid #DC2626" : "2px solid transparent" }}
+            >{label}</button>
+          ))}
+        </div>
+
+        {/* Conteúdo */}
+        <div>
+          {tab === "antifraude"    && <AbaAntifraude />}
+          {tab === "contratos"     && <AbaContratos />}
+          {tab === "clientes"      && <AbaClientes />}
+          {tab === "colaboradores" && <AbaColaboradores />}
+          {tab === "simulacoes"    && <AbaSimulacoes />}
+          {tab === "referencia"    && <AbaReferencia />}
+        </div>
+      </div>
+    </Layout>
+  );
+}

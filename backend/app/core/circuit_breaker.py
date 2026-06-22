@@ -77,7 +77,7 @@ class CircuitBreaker:
             self._registrar_falha()
             raise exc
 
-    async def chamar_async(self, func: Callable, *args, **kwargs):
+    async def chamar_async(self, func: Callable, *args, ignorar_excecoes: tuple = (), **kwargs):
         estado_atual = self.estado
 
         if estado_atual == Estado.OPEN:
@@ -91,8 +91,16 @@ class CircuitBreaker:
             self._registrar_sucesso()
             return resultado
         except Exception as exc:
-            self._registrar_falha()
+            # Erros de configuração (ex: credenciais inválidas) não contam como falha de serviço
+            if not isinstance(exc, ignorar_excecoes):
+                self._registrar_falha()
             raise exc
+
+    def resetar(self):
+        with self._lock:
+            self._estado = Estado.CLOSED
+            self._contagem_falhas = 0
+            self._ultimo_tempo_falha = 0.0
 
     def __repr__(self):
         return (

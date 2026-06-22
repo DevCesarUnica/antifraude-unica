@@ -158,6 +158,35 @@ def obter_proposta(proposta_id: str, db: Session = Depends(get_db)):
     return proposta
 
 
+@router.get("/{proposta_id}/debug")
+def debug_proposta(proposta_id: str, db: Session = Depends(get_db)):
+    """
+    Retorna o raio-x completo da decisão antifraude:
+    regras que dispararam, score, motivo e trilha de auditoria.
+    """
+    proposta = _get_ou_404(db, proposta_id)
+    historico = AuditoriaService(db).historico(proposta_id)
+    return {
+        "id": proposta.id,
+        "proposta_id_externo": proposta.proposta_id_externo,
+        "status": proposta.status,
+        "score_fraude": proposta.score_fraude,
+        "resultado_motor": proposta.resultado_motor,
+        "tentativas": proposta.tentativas,
+        "ultimo_erro": proposta.ultimo_erro,
+        "decisao": proposta.decisao_detalhes,
+        "auditoria": [
+            {
+                "evento": e.evento,
+                "dados": e.dados,
+                "usuario": e.usuario,
+                "timestamp": e.timestamp.isoformat(),
+            }
+            for e in historico
+        ],
+    }
+
+
 @router.get("/{proposta_id}/auditoria", response_model=list[AuditoriaOut])
 def auditoria_proposta(proposta_id: str, db: Session = Depends(get_db)):
     proposta = db.query(Proposta).filter(Proposta.id == proposta_id).first()

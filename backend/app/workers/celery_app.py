@@ -41,6 +41,15 @@ celery_app.conf.update(
 
     # Resultados expiram em 24h
     result_expires=86400,
+
+    # Robô de varredura — roda a cada 5 minutos
+    beat_schedule={
+        "varredura-propostas-pendentes": {
+            "task": "propostas.robo.varredura",
+            "schedule": 300,  # segundos
+            "options": {"queue": "propostas"},
+        },
+    },
 )
 
 celery_app.autodiscover_tasks(["app.workers"])

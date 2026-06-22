@@ -13,7 +13,10 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    // 401 só faz logout se não for uma rota de integração externa (/storm, /titan)
+    const url: string = err.config?.url ?? "";
+    const isExternalIntegration = url.startsWith("/storm") || url.startsWith("/titan");
+    if (err.response?.status === 401 && !isExternalIntegration) {
       localStorage.removeItem("token");
       window.location.href = "/login";
     }
@@ -110,5 +113,242 @@ export const desativarUsuario = (id: string) =>
 
 export const excluirUsuario = (id: string) =>
   api.delete(`/usuarios/${id}/excluir`).then((r) => r.data);
+
+// ── Storm (Colaborador) ───────────────────────────────────────────────────────
+
+export const getStormStatus = () =>
+  api.get("/storm/status").then((r) => r.data);
+
+export const resetarCircuitBreakerStorm = () =>
+  api.post("/storm/status/reset").then((r) => r.data);
+
+export const getStormAntifraude = (esteira: string, pagina = 1) =>
+  api.get("/storm/antifraude/contratos", { params: { esteira, pagina } }).then((r) => r.data);
+
+export const getStormTiposRecusas = () =>
+  api.get("/storm/antifraude/tipos-recusas").then((r) => r.data);
+
+export const getStormTiposPendencias = () =>
+  api.get("/storm/antifraude/tipos-pendencias").then((r) => r.data);
+
+export const aprovarContratoStorm = (id: number) =>
+  api.post(`/storm/antifraude/${id}/aprovar`).then((r) => r.data);
+
+export const recusarContratoStorm = (id: number, data: { tipo_recusa_id: number; observacao?: string }) =>
+  api.post(`/storm/antifraude/${id}/recusar`, data).then((r) => r.data);
+
+export const pendenciarContratoStorm = (id: number, data: { tipo_pendencia_id: number; observacao?: string }) =>
+  api.post(`/storm/antifraude/${id}/pendenciar`, data).then((r) => r.data);
+
+export const reanalisarContratoStorm = (id: number, data: { observacao: string }) =>
+  api.post(`/storm/antifraude/${id}/reanalisar`, data).then((r) => r.data);
+
+export const getStormContratos = (params?: {
+  pagina?: number; cpf?: string; ff?: string; id_banco?: number; id_status?: number;
+}) => api.get("/storm/contratos", { params }).then((r) => r.data);
+
+export const getStormHistoricoContrato = (ff: string) =>
+  api.get("/storm/contratos/historico", { params: { ff } }).then((r) => r.data);
+
+export const getStormClienteCpf = (cpf: string) =>
+  api.get(`/storm/clientes/cpf/${cpf}`).then((r) => r.data);
+
+export const getStormClienteTelefone = (tel: string) =>
+  api.get(`/storm/clientes/telefone/${tel}`).then((r) => r.data);
+
+export const getStormColaboradores = (params?: { pagina?: number; usuario?: string; status_usuario?: string }) =>
+  api.get("/storm/colaboradores", { params }).then((r) => r.data);
+
+export const getStormColaborador = (id: number) =>
+  api.get(`/storm/colaboradores/${id}`).then((r) => r.data);
+
+export const simularCLTStorm = (cpf: string, banco_id: number, valor_solicitado?: number, matricula?: string) =>
+  api.get("/storm/simulacoes/clt", { params: { cpf, banco_id, valor_solicitado, matricula } }).then((r) => r.data);
+
+export const simularFGTSStorm = (cpf: string, banco_id: number) =>
+  api.get("/storm/simulacoes/fgts", { params: { cpf, banco_id } }).then((r) => r.data);
+
+export const getStormBancos = () =>
+  api.get("/storm/bancos").then((r) => r.data);
+
+export const getStormOrgaos = () =>
+  api.get("/storm/orgaos").then((r) => r.data);
+
+export const getStormStatusContratos = () =>
+  api.get("/storm/contratos/status").then((r) => r.data);
+
+// ── Corretores ────────────────────────────────────────────────────────────────
+
+export const getCorretores = (params?: { nome?: string; cpf?: string; grupo_id?: string; ativo?: boolean }) =>
+  api.get("/corretores/", { params }).then((r) => r.data);
+
+export const criarCorretor = (data: unknown) =>
+  api.post("/corretores/", data).then((r) => r.data);
+
+export const getCorretorById = (id: string) =>
+  api.get(`/corretores/${id}`).then((r) => r.data);
+
+export const atualizarCorretor = (id: string, data: unknown) =>
+  api.patch(`/corretores/${id}`, data).then((r) => r.data);
+
+export const desativarCorretor = (id: string) =>
+  api.delete(`/corretores/${id}`).then((r) => r.data);
+
+export const getContatosCorretor = (id: string) =>
+  api.get(`/corretores/${id}/contatos`).then((r) => r.data);
+
+export const adicionarContatoCorretor = (id: string, data: unknown) =>
+  api.post(`/corretores/${id}/contatos`, data).then((r) => r.data);
+
+export const removerContatoCorretor = (corretorId: string, contatoId: string) =>
+  api.delete(`/corretores/${corretorId}/contatos/${contatoId}`).then((r) => r.data);
+
+export const importarCorretoresCSV = (file: File) => {
+  const fd = new FormData();
+  fd.append("arquivo", file);
+  return api.post("/corretores/importar", fd).then((r) => r.data);
+};
+
+export const getHistoricoImportacoesCorretores = () =>
+  api.get("/corretores/importacoes/historico").then((r) => r.data);
+
+// ── Grupos ────────────────────────────────────────────────────────────────────
+
+export const getGrupos = (params?: { ativo?: boolean }) =>
+  api.get("/grupos/", { params }).then((r) => r.data);
+
+export const criarGrupo = (data: unknown) =>
+  api.post("/grupos/", data).then((r) => r.data);
+
+export const getGrupoById = (id: string) =>
+  api.get(`/grupos/${id}`).then((r) => r.data);
+
+export const atualizarGrupo = (id: string, data: unknown) =>
+  api.patch(`/grupos/${id}`, data).then((r) => r.data);
+
+export const desativarGrupo = (id: string) =>
+  api.delete(`/grupos/${id}`).then((r) => r.data);
+
+export const vincularCorretorGrupo = (grupoId: string, corretorId: string) =>
+  api.post(`/grupos/${grupoId}/corretores/${corretorId}`).then((r) => r.data);
+
+export const desvincularCorretorGrupo = (grupoId: string, corretorId: string) =>
+  api.delete(`/grupos/${grupoId}/corretores/${corretorId}`).then((r) => r.data);
+
+// ── Layouts de Importação ─────────────────────────────────────────────────────
+
+export const getLayouts = (tipo?: string) =>
+  api.get("/layouts/", { params: tipo ? { tipo } : {} }).then((r) => r.data);
+
+export const criarLayout = (data: unknown) =>
+  api.post("/layouts/", data).then((r) => r.data);
+
+export const atualizarLayout = (id: string, data: unknown) =>
+  api.patch(`/layouts/${id}`, data).then((r) => r.data);
+
+export const desativarLayout = (id: string) =>
+  api.delete(`/layouts/${id}`).then((r) => r.data);
+
+export const getMapeamentosLayout = (layoutId: string) =>
+  api.get(`/layouts/${layoutId}/mapeamentos`).then((r) => r.data);
+
+export const criarMapeamento = (layoutId: string, data: unknown) =>
+  api.post(`/layouts/${layoutId}/mapeamentos`, data).then((r) => r.data);
+
+export const removerMapeamento = (layoutId: string, mapeamentoId: string) =>
+  api.delete(`/layouts/${layoutId}/mapeamentos/${mapeamentoId}`).then((r) => r.data);
+
+// ── Importações ───────────────────────────────────────────────────────────────
+
+export const importarPropostasCSV = (file: File, layoutId?: string) => {
+  const fd = new FormData();
+  fd.append("arquivo", file);
+  if (layoutId) fd.append("layout_id", layoutId);
+  return api.post("/importacoes/propostas", fd).then((r) => r.data);
+};
+
+export const getImportacoesPropostas = () =>
+  api.get("/importacoes/propostas").then((r) => r.data);
+
+export const getDetalheImportacao = (id: string) =>
+  api.get(`/importacoes/propostas/${id}`).then((r) => r.data);
+
+// ── Averbações ────────────────────────────────────────────────────────────────
+
+export const getAverbacoes = (params?: { status_av?: string; banco?: string }) =>
+  api.get("/averbacoes/", { params }).then((r) => r.data);
+
+export const averbarProposta = (propostaId: string, data: unknown) =>
+  api.post(`/averbacoes/propostas/${propostaId}`, data).then((r) => r.data);
+
+export const getAverbacoesProposta = (propostaId: string) =>
+  api.get(`/averbacoes/propostas/${propostaId}`).then((r) => r.data);
+
+export const confirmarAverbacao = (id: string, numeroOperacao?: string) =>
+  api.post(`/averbacoes/${id}/confirmar`, null, { params: numeroOperacao ? { numero_operacao: numeroOperacao } : {} }).then((r) => r.data);
+
+export const cancelarAverbacao = (id: string) =>
+  api.post(`/averbacoes/${id}/cancelar`).then((r) => r.data);
+
+// ── Retornos Banco ────────────────────────────────────────────────────────────
+
+export const getRetornosBanco = (params?: { banco?: string; tipo_retorno?: string; processado?: boolean }) =>
+  api.get("/retornos-banco/", { params }).then((r) => r.data);
+
+export const registrarRetornoBanco = (data: unknown) =>
+  api.post("/retornos-banco/", data).then((r) => r.data);
+
+export const processarRetornoBanco = (id: string) =>
+  api.post(`/retornos-banco/${id}/processar`).then((r) => r.data);
+
+// ── Pendências ────────────────────────────────────────────────────────────────
+
+export const getPendencias = (params?: { tipo?: string; resolvida?: boolean; proposta_id?: string }) =>
+  api.get("/pendencias/", { params }).then((r) => r.data);
+
+export const criarPendencia = (data: unknown) =>
+  api.post("/pendencias/", data).then((r) => r.data);
+
+export const atualizarPendencia = (id: string, data: unknown) =>
+  api.patch(`/pendencias/${id}`, data).then((r) => r.data);
+
+export const resolverPendencia = (id: string, resolucao?: string) =>
+  api.post(`/pendencias/${id}/resolver`, null, { params: resolucao ? { resolucao } : {} }).then((r) => r.data);
+
+// ── Logs ──────────────────────────────────────────────────────────────────────
+
+export const getLogsAcesso = (params?: { metodo?: string; endpoint?: string; status_code?: number }) =>
+  api.get("/logs/acesso", { params }).then((r) => r.data);
+
+export const getResumoLogs = () =>
+  api.get("/logs/acesso/resumo").then((r) => r.data);
+
+// ── Convênios ─────────────────────────────────────────────────────────────────
+
+export const getConvenios = (params?: { ativo?: boolean; auto_registrado?: boolean }) =>
+  api.get("/convenios/", { params }).then((r) => r.data);
+
+export const criarConvenio = (data: unknown) =>
+  api.post("/convenios/", data).then((r) => r.data);
+
+export const atualizarConvenio = (id: string, data: unknown) =>
+  api.patch(`/convenios/${id}`, data).then((r) => r.data);
+
+// ── Relatórios ────────────────────────────────────────────────────────────────
+
+export const getKPIs = () =>
+  api.get("/relatorios/kpis").then((r) => r.data);
+
+export const getRelatorioPropostas = (params?: unknown) =>
+  api.get("/relatorios/propostas", { params }).then((r) => r.data);
+
+export const getRelatorioAntifraude = (params?: unknown) =>
+  api.get("/relatorios/antifraude", { params }).then((r) => r.data);
+
+export const getRelatorioCorretores = (params?: unknown) =>
+  api.get("/relatorios/corretores", { params }).then((r) => r.data);
+
+export const baixarRelatorioCSV = (tipo: "propostas" | "antifraude" | "corretores" | "auditoria", params?: unknown) =>
+  api.get(`/relatorios/${tipo}`, { params: { ...params as object, formato: "csv" }, responseType: "blob" }).then((r) => r.data);
 
 export default api;

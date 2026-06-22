@@ -17,6 +17,8 @@ Dead Letter Queue (DLQ):
 """
 
 import asyncio
+from datetime import datetime, timedelta
+
 from celery import shared_task
 from celery.utils.log import get_task_logger
 from sqlalchemy.exc import SQLAlchemyError
@@ -212,6 +214,69 @@ def _mover_para_dlq(proposta_id: str, motivo: str):
         args=[proposta_id, motivo],
         queue="propostas.dlq",
     )
+
+
+# ── Robô de varredura periódica ───────────────────────────────────────────────
+
+@shared_task(
+    name="propostas.robo.varredura",
+    queue="propostas",
+    ignore_result=True,
+)
+def varredura_pendentes():
+    """
+    Robô que roda a cada 5 minutos (via Celery Beat) e:
+      1. Reprocessa propostas ENFILEIRADA presas há mais de 5 minutos.
+      2. Registra ERRO em propostas EM_ANALISE travadas há mais de 10 minutos.
+
+    Resolve situações em que o worker caiu durante o processamento.
+    """
+    db = SessionLocal()
+    try:
+        agora = datetime.utcnow()
+        limite_enfileirada = agora - timedelta(minutes=5)
+        limite_analise = agora - timedelta(minutes=10)
+
+        # Propostas presas em ENFILEIRADA
+        travadas = db.query(Proposta).filter(
+            Proposta.status == StatusProposta.ENFILEIRADA,
+            Proposta.atualizado_em < limite_enfileirada,
+        ).all()
+
+        for p in travadas:
+            log.warning("robo.reprocessando_enfileirada", proposta_id=p.id, atualizado_em=p.atualizado_em.isoformat())
+            processar_proposta.apply_async(args=[p.id], queue="propostas")
+
+        # Propostas presas em EM_ANALISE (worker morreu no meio do processamento)
+        analise_travada = db.query(Proposta).filter(
+            Proposta.status == StatusProposta.EM_ANALISE,
+            Proposta.atualizado_em < limite_analise,
+        ).all()
+
+        for p in analise_travada:
+            log.error("robo.analise_travada", proposta_id=p.id)
+            p.status = StatusProposta.ERRO
+            p.ultimo_erro = "Processamento travado — reprocesse manualmente"
+            AuditoriaService(db).registrar(
+                p.id,
+                TipoEvento.ERRO,
+                dados={"motivo": "timeout_analise", "robo": True},
+            )
+
+        if analise_travada:
+            db.commit()
+
+        log.info(
+            "robo.varredura_concluida",
+            reprocessadas=len(travadas),
+            erro_timeout=len(analise_travada),
+        )
+
+    except Exception as exc:
+        db.rollback()
+        log.error("robo.varredura_erro", error=str(exc))
+    finally:
+        db.close()
 
 
 async def _chamar_banco(proposta: Proposta) -> dict:

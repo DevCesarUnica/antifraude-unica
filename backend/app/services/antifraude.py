@@ -23,7 +23,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Proposta, RegraAntifraude, Blacklist, TipoRegra, ResultadoMotor
+    Proposta, RegraAntifraude, Blacklist, Convenio, TipoRegra, ResultadoMotor
 )
 from app.core.logging import log
 
@@ -58,6 +58,7 @@ class MotorAntifraude:
     # ── Ponto de entrada público ──────────────────────────────────────────────
 
     def avaliar(self, proposta: Proposta) -> Decisao:
+        self._auto_mapear_convenio(proposta)
         regras = self._carregar_regras()
         log.info(
             "motor.inicio",
@@ -126,6 +127,40 @@ class MotorAntifraude:
             flags=flags,
             regras_disparadas=regras_disparadas,
         )
+
+    # ── Auto-mapeamento de convênio ───────────────────────────────────────────
+
+    def _auto_mapear_convenio(self, proposta: Proposta) -> None:
+        """
+        Registra automaticamente convênios desconhecidos na tabela de referência.
+        Elimina o status NAO_MAPEADA sem intervenção humana.
+        """
+        if not proposta.convenio:
+            return
+
+        existente = self._db.query(Convenio).filter(
+            Convenio.nome == proposta.convenio
+        ).first()
+
+        if not existente:
+            novo = Convenio(
+                nome=proposta.convenio,
+                banco=proposta.banco,
+                ativo=True,
+                auto_registrado=True,
+            )
+            self._db.add(novo)
+            try:
+                self._db.flush()
+                log.info(
+                    "motor.convenio_auto_registrado",
+                    convenio=proposta.convenio,
+                    banco=proposta.banco,
+                    proposta_id=proposta.id,
+                )
+            except Exception:
+                # Conflito de unicidade em race condition — já foi criado por outro processo
+                self._db.rollback()
 
     # ── Avaliação individual por tipo ─────────────────────────────────────────
 
@@ -214,11 +249,6 @@ class MotorAntifraude:
         if proposta.valor > valor_medio * 3:
             score_local += 20
             detalhes["valor_alto"] = True
-
-        # Fator: sem convênio mapeado
-        if not proposta.convenio:
-            score_local += 10
-            detalhes["sem_convenio"] = True
 
         if score_local > 0:
             return ResultadoRegra(

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import LogAcesso
+from app.models import LogAcesso, Usuario
 from app.schemas import LogAcessoOut
 
 router = APIRouter(prefix="/logs", tags=["logs"])
@@ -25,7 +25,10 @@ def listar_logs(
     limit: int = 200,
     db: Session = Depends(get_db),
 ):
-    q = db.query(LogAcesso)
+    q = (
+        db.query(LogAcesso, Usuario.nome, Usuario.perfil)
+        .outerjoin(Usuario, LogAcesso.usuario_id == Usuario.id)
+    )
     if usuario_id:
         q = q.filter(LogAcesso.usuario_id == usuario_id)
     if metodo:
@@ -38,7 +41,25 @@ def listar_logs(
         q = q.filter(LogAcesso.timestamp >= data_inicio)
     if data_fim:
         q = q.filter(LogAcesso.timestamp <= data_fim)
-    return q.order_by(LogAcesso.timestamp.desc()).offset(skip).limit(limit).all()
+
+    rows = q.order_by(LogAcesso.timestamp.desc()).offset(skip).limit(limit).all()
+
+    return [
+        {
+            "id": log.id,
+            "usuario_id": log.usuario_id,
+            "username": log.username,
+            "nome": nome,
+            "perfil": str(perfil) if perfil else None,
+            "metodo": log.metodo,
+            "endpoint": log.endpoint,
+            "ip": log.ip,
+            "status_code": log.status_code,
+            "duracao_ms": log.duracao_ms,
+            "timestamp": log.timestamp,
+        }
+        for log, nome, perfil in rows
+    ]
 
 
 @router.get("/acesso/resumo")

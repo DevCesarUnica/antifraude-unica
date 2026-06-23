@@ -442,6 +442,8 @@ class LogAcessoOut(BaseModel):
     id: str
     usuario_id: str | None
     username: str | None
+    nome: str | None = None
+    perfil: str | None = None
     metodo: str
     endpoint: str
     ip: str | None

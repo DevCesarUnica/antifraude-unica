@@ -4,9 +4,14 @@ import { getLogsAcesso, getResumoLogs } from "../lib/api";
 
 interface LogAcesso {
   id: string; usuario_id: string | null; username: string | null;
+  nome: string | null; perfil: string | null;
   metodo: string; endpoint: string; ip: string | null;
   status_code: number; duracao_ms: number | null; timestamp: string;
 }
+
+const PERFIL_COR: Record<string, string> = {
+  admin: "#EF4444", gestor: "#F59E0B", analista: "#3B82F6", operador: "#6B7280",
+};
 interface Resumo { por_status: Record<string, number>; }
 
 const METODO_COR: Record<string, string> = { GET: "#22C55E", POST: "#3B82F6", PATCH: "#F59E0B", DELETE: "#EF4444" };
@@ -104,7 +109,17 @@ export default function LogsPage() {
                     <td className="px-4 py-2.5 font-mono" style={{ color: "var(--text-muted)" }}>
                       {new Date(l.timestamp).toLocaleString("pt-BR")}
                     </td>
-                    <td className="px-4 py-2.5" style={{ color: "var(--text-primary)" }}>{l.username ?? "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <div style={{ color: "var(--text-primary)" }}>{l.nome ?? l.username ?? "—"}</div>
+                      {l.nome && l.username && (
+                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>@{l.username}</div>
+                      )}
+                      {l.perfil && (
+                        <span className="text-xs px-1.5 py-0.5 rounded font-bold mt-0.5 inline-block" style={{ backgroundColor: `${PERFIL_COR[l.perfil] ?? "#6B7280"}20`, color: PERFIL_COR[l.perfil] ?? "#6B7280" }}>
+                          {l.perfil}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5">
                       <span className="px-1.5 py-0.5 rounded font-mono font-bold text-xs" style={{ backgroundColor: `${METODO_COR[l.metodo] ?? "#6B7280"}20`, color: METODO_COR[l.metodo] ?? "#6B7280" }}>
                         {l.metodo}

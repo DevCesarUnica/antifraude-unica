@@ -13,6 +13,7 @@ import {
   reanalisarContratoStorm,
   getStormContratos,
   getStormHistoricoContrato,
+  getStormAcompanhamentoContrato,
   getStormStatusContratos,
   getStormClienteCpf,
   getStormClienteTelefone,
@@ -105,6 +106,7 @@ function formatBRL(v: number | string | undefined) {
 function AbaAntifraude() {
   const [contratos, setContratos] = useState<AnyData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [stats, setStats] = useState({ pendentes: 0, aprovados: 0, recusados: 0, em_analise: 0 });
   const ESTEIRAS = [
     "Analisar/Reanalisar",
     "Pendentes",
@@ -124,7 +126,13 @@ function AbaAntifraude() {
     setLoading(true); setErro("");
     try {
       const data = await getStormAntifraude(esteira, pagina);
-      setContratos(normalize(data, ["contratos", "items", "data"]));
+      const lista = normalize(data, ["contratos", "items", "data"]);
+      setContratos(lista);
+      // Calcula stats da lista carregada
+      const pendentes   = lista.filter((c: AnyData) => /(pendente|analise|análise)/i.test(c.status ?? "")).length;
+      const aprovados   = lista.filter((c: AnyData) => /aprovad/i.test(c.status ?? "")).length;
+      const recusados   = lista.filter((c: AnyData) => /(recusad|negad)/i.test(c.status ?? "")).length;
+      setStats({ pendentes, aprovados, recusados, em_analise: lista.length - pendentes - aprovados - recusados });
     } catch (e: AnyData) {
       setErro(e?.response?.data?.detail ?? "Erro ao buscar contratos antifraude");
     } finally { setLoading(false); }
@@ -169,6 +177,21 @@ function AbaAntifraude() {
         </select>
         <button onClick={() => { setPagina(1); buscar(); }} className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Buscar</button>
         <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => setPagina((p) => p + 1)} />
+      </div>
+
+      {/* Cards de resumo */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Na fila",    value: stats.pendentes,   bg: "rgba(234,179,8,0.1)",   color: "#eab308"  },
+          { label: "Aprovados",  value: stats.aprovados,   bg: "rgba(34,197,94,0.1)",   color: "#22c55e"  },
+          { label: "Recusados",  value: stats.recusados,   bg: "rgba(220,38,38,0.1)",   color: "#DC2626"  },
+          { label: "Em análise", value: stats.em_analise,  bg: "rgba(59,130,246,0.1)",  color: "#3b82f6"  },
+        ].map(({ label, value, bg, color }) => (
+          <div key={label} className="rounded-xl p-3" style={{ backgroundColor: bg, border: `1px solid ${color}30` }}>
+            <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</p>
+            <p className="text-2xl font-black mt-0.5" style={{ color: "var(--text-primary)" }}>{value}</p>
+          </div>
+        ))}
       </div>
 
       {msg && <AlertOk msg={msg} />}
@@ -285,6 +308,11 @@ function AbaContratos() {
   const [pagina, setPagina] = useState(1);
   const [historico, setHistorico] = useState<AnyData[] | null>(null);
   const [ffHistorico, setFfHistorico] = useState("");
+  const [acompanhamento, setAcompanhamento] = useState<AnyData | null>(null);
+  const [ffAcomp, setFfAcomp] = useState("");
+  const [loadingAcomp, setLoadingAcomp] = useState(false);
+  const [dataInicio, setDataInicio] = useState("");
+  const [dataFim, setDataFim] = useState("");
   const [erro, setErro] = useState("");
 
   useEffect(() => {
@@ -298,7 +326,14 @@ function AbaContratos() {
   const buscar = async () => {
     setLoading(true); setErro(""); setHistorico(null);
     try {
-      const data = await getStormContratos({ cpf: cpf || undefined, ff: ff || undefined, id_banco: idBanco ? Number(idBanco) : undefined, id_status: idStatus ? Number(idStatus) : undefined, pagina });
+      const data = await getStormContratos({
+        cpf: cpf || undefined, ff: ff || undefined,
+        id_banco: idBanco ? Number(idBanco) : undefined,
+        id_status: idStatus ? Number(idStatus) : undefined,
+        pagina,
+        data_inicio: dataInicio || undefined,
+        data_fim: dataFim || undefined,
+      });
       setContratos(normalize(data, ["contratos", "items", "data"]));
     } catch (e: AnyData) {
       setErro(e?.response?.data?.detail ?? "Erro ao buscar contratos");
@@ -311,6 +346,17 @@ function AbaContratos() {
       const data = await getStormHistoricoContrato(ffCode);
       setHistorico(normalize(data, ["historico", "items"]));
     } catch { setHistorico([]); }
+  };
+
+  const verAcompanhamento = async (ffCode: string) => {
+    setFfAcomp(ffCode);
+    setAcompanhamento({});
+    setLoadingAcomp(true);
+    try {
+      const data = await getStormAcompanhamentoContrato(ffCode);
+      setAcompanhamento(data);
+    } catch { setAcompanhamento(null); }
+    finally { setLoadingAcomp(false); }
   };
 
   return (
@@ -338,8 +384,21 @@ function AbaContratos() {
             {statusList.map((s: AnyData) => <option key={s.id ?? s.co_id} value={s.id ?? s.co_id}>{s.descricao ?? s.nome ?? s.status}</option>)}
           </select>
         </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Data início</label>
+          <input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="w-full px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Data fim</label>
+          <input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="w-full px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+        </div>
         <div className="col-span-2 sm:col-span-4 flex items-center justify-between">
-          <button onClick={() => { setPagina(1); buscar(); }} className="px-5 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Buscar contratos</button>
+          <div className="flex gap-2">
+            <button onClick={() => { setPagina(1); buscar(); }} className="px-5 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Buscar contratos</button>
+            {(dataInicio || dataFim) && (
+              <button onClick={() => { setDataInicio(""); setDataFim(""); }} className="px-3 py-2 rounded-lg text-xs font-semibold" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)" }}>Limpar datas</button>
+            )}
+          </div>
           <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => { setPagina((p) => p + 1); buscar(); }} />
         </div>
       </div>
@@ -368,14 +427,45 @@ function AbaContratos() {
                     {c.status ? <Badge label={String(c.status)} color="blue" /> : "—"}
                   </td>
                   <td className="px-3 py-2.5">
-                    {(c.ff || c.codigo) && (
-                      <button onClick={() => verHistorico(c.ff ?? c.codigo)} className="px-2 py-1 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(59,130,246,0.12)", color: "#3b82f6" }}>Histórico</button>
-                    )}
+                    <div className="flex gap-1.5">
+                      {(c.ff || c.codigo) && (
+                        <button onClick={() => verAcompanhamento(c.ff ?? c.codigo)} className="px-2 py-1 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(34,197,94,0.12)", color: "#22c55e" }}>Acomp.</button>
+                      )}
+                      {(c.ff || c.codigo) && (
+                        <button onClick={() => verHistorico(c.ff ?? c.codigo)} className="px-2 py-1 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(59,130,246,0.12)", color: "#3b82f6" }}>Histórico</button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Modal acompanhamento */}
+      {(acompanhamento !== null || loadingAcomp) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.65)" }}>
+          <div className="w-full max-w-lg rounded-2xl p-6 shadow-2xl max-h-[80vh] overflow-y-auto" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-sm font-black" style={{ color: "var(--text-primary)" }}>Acompanhamento — {ffAcomp}</h3>
+              <button onClick={() => { setAcompanhamento(null); setFfAcomp(""); }} className="text-xs px-3 py-1.5 rounded-lg" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)" }}>Fechar</button>
+            </div>
+            {loadingAcomp ? <Spinner /> : acompanhamento && Object.keys(acompanhamento).length > 0 ? (
+              <div className="space-y-1">
+                {Object.entries(acompanhamento).map(([k, v]) => (
+                  typeof v !== "object" || v === null ? (
+                    <div key={k} className="flex gap-3 py-1.5" style={{ borderBottom: "1px solid var(--border)" }}>
+                      <span className="text-[10px] font-bold uppercase w-40 flex-shrink-0" style={{ color: "var(--text-muted)" }}>{k.replace(/_/g, " ")}</span>
+                      <span className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{String(v ?? "—")}</span>
+                    </div>
+                  ) : null
+                ))}
+              </div>
+            ) : (
+              <EmptyState msg="Nenhum dado de acompanhamento disponível." />
+            )}
+          </div>
         </div>
       )}
 

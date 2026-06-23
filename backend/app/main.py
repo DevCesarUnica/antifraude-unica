@@ -14,6 +14,7 @@ from app.routers import (
     propostas, regras, titan, auth, bancos, usuarios, storm,
     convenios, corretores, grupos, layouts, importacoes,
     averbacoes, retornos_banco, pendencias, logs, relatorios,
+    blacklist,
 )
 
 
@@ -97,6 +98,7 @@ app.include_router(retornos_banco.router)
 app.include_router(pendencias.router)
 app.include_router(logs.router)
 app.include_router(relatorios.router)
+app.include_router(blacklist.router)
 
 
 @app.get("/health")

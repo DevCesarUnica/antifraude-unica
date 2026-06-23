@@ -136,6 +136,15 @@ async def listar_contratos(
         _handle_error(exc)
 
 
+@router.get("/contratos/{ff}/acompanhamento")
+async def acompanhamento_contrato(ff: str):
+    try:
+        async with StormService() as storm:
+            return await storm.get_acompanhamento_contrato(ff)
+    except StormAPIError as exc:
+        _handle_error(exc)
+
+
 @router.get("/contratos/historico")
 async def historico_contrato(ff: str = Query(..., description="Código FF do contrato")):
     try:

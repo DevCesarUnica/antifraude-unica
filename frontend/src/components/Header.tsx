@@ -28,6 +28,7 @@ const NAV_GRUPOS: NavGroup[] = [
     label: "Análise",
     items: [
       { to: "/storm",       label: "Storm",        desc: "Mesa de crédito — antifraude e contratos" },
+      { to: "/blacklist",   label: "Blacklist",    desc: "CPF, CNPJ, telefone e e-mail bloqueados" },
       { to: "/regras",      label: "Regras",       desc: "Motor antifraude — configuração de regras" },
       { to: "/relatorios",  label: "Relatórios",   desc: "KPIs, exportações CSV e análises" },
     ],

@@ -12,6 +12,7 @@ import ImportacoesPage from "./pages/ImportacoesPage";
 import PendenciasPage from "./pages/PendenciasPage";
 import LogsPage from "./pages/LogsPage";
 import RelatoriosPage from "./pages/RelatoriosPage";
+import BlacklistPage from "./pages/BlacklistPage";
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
       <Route path="/pendencias" element={<PendenciasPage />} />
       <Route path="/logs" element={<LogsPage />} />
       <Route path="/relatorios" element={<RelatoriosPage />} />
+      <Route path="/blacklist" element={<BlacklistPage />} />
     </Routes>
   );
 }

@@ -145,6 +145,7 @@ export const reanalisarContratoStorm = (id: number, data: { observacao: string }
 
 export const getStormContratos = (params?: {
   pagina?: number; cpf?: string; ff?: string; id_banco?: number; id_status?: number;
+  data_inicio?: string; data_fim?: string;
 }) => api.get("/storm/contratos", { params }).then((r) => r.data);
 
 export const getStormHistoricoContrato = (ff: string) =>
@@ -176,6 +177,9 @@ export const getStormOrgaos = () =>
 
 export const getStormStatusContratos = () =>
   api.get("/storm/contratos/status").then((r) => r.data);
+
+export const getStormAcompanhamentoContrato = (ff: string) =>
+  api.get(`/storm/contratos/${encodeURIComponent(ff)}/acompanhamento`).then((r) => r.data);
 
 // ── Corretores ────────────────────────────────────────────────────────────────
 
@@ -350,5 +354,25 @@ export const getRelatorioCorretores = (params?: unknown) =>
 
 export const baixarRelatorioCSV = (tipo: "propostas" | "antifraude" | "corretores" | "auditoria", params?: unknown) =>
   api.get(`/relatorios/${tipo}`, { params: { ...params as object, formato: "csv" }, responseType: "blob" }).then((r) => r.data);
+
+// ── Blacklist ─────────────────────────────────────────────────────────────────
+
+export const getBlacklist = (params?: { pagina?: number; limite?: number; tipo?: string; busca?: string }) =>
+  api.get("/blacklist/", { params }).then((r) => r.data);
+
+export const checkBlacklist = (tipo: string, valor: string) =>
+  api.post("/blacklist/check", { tipo, valor }).then((r) => r.data);
+
+export const criarEntradaBlacklist = (data: { tipo: string; valor: string; motivo: string; fonte?: string }) =>
+  api.post("/blacklist/", data).then((r) => r.data);
+
+export const removerEntradaBlacklist = (id: string) =>
+  api.delete(`/blacklist/${id}`).then((r) => r.data);
+
+export const importarBlacklist = (file: File) => {
+  const fd = new FormData();
+  fd.append("arquivo", file);
+  return api.post("/blacklist/import", fd).then((r) => r.data);
+};
 
 export default api;

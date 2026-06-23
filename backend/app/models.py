@@ -206,13 +206,29 @@ class RegraAntifraude(Base):
 
 # ── Blacklist ─────────────────────────────────────────────────────────────────
 
+class TipoBlacklist(str, PyEnum):
+    CPF      = "CPF"
+    CNPJ     = "CNPJ"
+    TELEFONE = "TELEFONE"
+    EMAIL    = "EMAIL"
+
+
 class Blacklist(Base):
     __tablename__ = "blacklist"
+    __table_args__ = (
+        UniqueConstraint("tipo", "valor", name="uq_blacklist_tipo_valor"),
+        Index("ix_blacklist_valor", "valor"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    cpf: Mapped[str] = mapped_column(String(14), unique=True, nullable=False, index=True)
+    tipo: Mapped[str] = mapped_column(
+        Enum(TipoBlacklist, name="tipo_blacklist"), nullable=False, index=True
+    )
+    valor: Mapped[str] = mapped_column(String(200), nullable=False)
     motivo: Mapped[str] = mapped_column(Text, nullable=False)
+    fonte: Mapped[str | None] = mapped_column(String(200), nullable=True)
     adicionado_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 

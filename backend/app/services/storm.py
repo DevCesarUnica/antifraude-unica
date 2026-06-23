@@ -317,6 +317,9 @@ class StormService:
     ) -> Any:
         params: dict[str, Any] = {"pagina": pagina}
         if cpf:
+            digits = "".join(c for c in cpf if c.isdigit())
+            if len(digits) == 11:
+                cpf = f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}"
             params["cpf_cliente"] = cpf
         if ff:
             params["ff"] = ff
@@ -335,6 +338,9 @@ class StormService:
     # ── Clientes ──────────────────────────────────────────────────────────────
 
     async def get_cliente_por_cpf(self, cpf: str) -> Any:
+        digits = "".join(c for c in cpf if c.isdigit())
+        if len(digits) == 11:
+            cpf = f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}"
         return await self._chamar_com_retry_get("/buscar_resumo_cliente_por_cpf", {"cpf": cpf})
 
     async def get_cliente_por_telefone(self, telefone: str) -> Any:

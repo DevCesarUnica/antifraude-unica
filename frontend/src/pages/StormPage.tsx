@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import Layout from "../components/Layout";
+import { mergeClienteAndContratos, stormErro, type ClienteNorm } from "../lib/storm-utils";
 import {
   getStormStatus,
   resetarCircuitBreakerStorm,
@@ -104,7 +105,13 @@ function formatBRL(v: number | string | undefined) {
 function AbaAntifraude() {
   const [contratos, setContratos] = useState<AnyData[]>([]);
   const [loading, setLoading] = useState(false);
-  const [esteira, setEsteira] = useState("antifraude");
+  const ESTEIRAS = [
+    "Analisar/Reanalisar",
+    "Pendentes",
+    "Aprovado aguardando liberação no banco",
+    "Migrados com informações incompletas",
+  ];
+  const [esteira, setEsteira] = useState("Analisar/Reanalisar");
   const [pagina, setPagina] = useState(1);
   const [tiposRecusas, setTiposRecusas] = useState<AnyData[]>([]);
   const [tiposPendencias, setTiposPendencias] = useState<AnyData[]>([]);
@@ -157,7 +164,9 @@ function AbaAntifraude() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
-        <input value={esteira} onChange={(e) => setEsteira(e.target.value)} placeholder="Fila (ex: antifraude)" className="px-3 py-2 rounded-lg text-xs flex-1 min-w-32" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+        <select value={esteira} onChange={(e) => setEsteira(e.target.value)} className="px-3 py-2 rounded-lg text-xs flex-1 min-w-48" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>
+          {ESTEIRAS.map((e) => <option key={e} value={e}>{e}</option>)}
+        </select>
         <button onClick={() => { setPagina(1); buscar(); }} className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Buscar</button>
         <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => setPagina((p) => p + 1)} />
       </div>
@@ -402,35 +411,92 @@ function AbaContratos() {
 function AbaClientes() {
   const [tipoBusca, setTipoBusca] = useState<"cpf" | "telefone">("cpf");
   const [valor, setValor] = useState("");
-  const [cliente, setCliente] = useState<AnyData | null>(null);
+  const [cliente, setCliente] = useState<ClienteNorm | null>(null);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
+  const [debugCliente, setDebugCliente] = useState<AnyData>(null);
+  const [debugContratos, setDebugContratos] = useState<AnyData>(null);
+  const [showDebug, setShowDebug] = useState(false);
 
   const buscar = async () => {
     if (!valor.trim()) return;
-    setLoading(true); setErro(""); setCliente(null);
+    setLoading(true); setErro(""); setCliente(null); setDebugCliente(null); setDebugContratos(null);
     try {
-      const data = tipoBusca === "cpf" ? await getStormClienteCpf(valor.replace(/\D/g, "")) : await getStormClienteTelefone(valor.replace(/\D/g, ""));
-      setCliente(data);
+      const digits = valor.replace(/\D/g, "");
+      // CPF formatado para endpoints que exigem XXX.XXX.XXX-XX
+      const cpfFmt = digits.length === 11
+        ? `${digits.slice(0,3)}.${digits.slice(3,6)}.${digits.slice(6,9)}-${digits.slice(9)}`
+        : valor;
+
+      if (tipoBusca === "cpf") {
+        const [rawCliente, rawContratos] = await Promise.allSettled([
+          getStormClienteCpf(digits),
+          getStormContratos({ cpf: cpfFmt }),
+        ]);
+
+        const clienteData = rawCliente.status === "fulfilled" ? rawCliente.value : null;
+        const contratosData = rawContratos.status === "fulfilled" ? rawContratos.value : null;
+
+        setDebugCliente(clienteData);
+        setDebugContratos(contratosData);
+
+        const erroMsg = stormErro(clienteData);
+        if (erroMsg && !contratosData) { setErro(erroMsg); return; }
+
+        const norm = mergeClienteAndContratos(clienteData, contratosData);
+        if (!norm) { setErro("CPF não encontrado ou sem contratos na base Storm."); return; }
+        setCliente(norm);
+      } else {
+        const raw = await getStormClienteTelefone(digits);
+        setDebugCliente(raw);
+        const erroMsg = stormErro(raw);
+        if (erroMsg) { setErro(erroMsg); return; }
+        const norm = mergeClienteAndContratos(raw, null);
+        if (!norm) { setErro("Telefone não encontrado na base Storm."); return; }
+        setCliente(norm);
+      }
     } catch (e: AnyData) {
-      setErro(e?.response?.data?.detail ?? "Cliente não encontrado");
+      setErro(e?.response?.data?.detail ?? "Erro na busca. Verifique os dados e tente novamente.");
     } finally { setLoading(false); }
   };
 
-  const info = (label: string, val: AnyData) => val != null && val !== "" && (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>{label}</span>
-      <span className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{String(val)}</span>
+  const Field = ({ label, value, mono = false, omitDash = false }: { label: string; value: string; mono?: boolean; omitDash?: boolean }) => {
+    if (omitDash && value === "—") return null;
+    return (
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: "var(--text-muted)" }}>{label}</p>
+        <p className={`text-sm font-semibold${mono ? " font-mono" : ""}`} style={{ color: "var(--text-primary)" }}>{value}</p>
+      </div>
+    );
+  };
+
+  const Section = ({ title, accent, children }: { title: string; accent: string; children: React.ReactNode }) => (
+    <div className="rounded-xl overflow-hidden" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+      <div className="px-4 py-2.5" style={{ backgroundColor: `${accent}14`, borderBottom: `1px solid ${accent}30` }}>
+        <p className="text-[11px] font-black uppercase tracking-widest" style={{ color: accent }}>{title}</p>
+      </div>
+      <div className="p-4">{children}</div>
     </div>
   );
 
+  const situacaoCor = (s: string): "green" | "red" | "yellow" | "gray" => {
+    const sl = s.toLowerCase();
+    if (sl.includes("ativo")) return "green";
+    if (sl.includes("inativo") || sl.includes("cessado") || sl.includes("bloqueado")) return "red";
+    if (sl.includes("suspens") || sl.includes("pendente")) return "yellow";
+    return "gray";
+  };
+
   return (
     <div className="space-y-4 max-w-2xl">
+
+      {/* ── Barra de busca ── */}
       <div className="p-4 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
         <div className="flex gap-2 mb-3">
           {(["cpf", "telefone"] as const).map((t) => (
-            <button key={t} onClick={() => { setTipoBusca(t); setValor(""); setCliente(null); setErro(""); }}
-              className="px-4 py-2 rounded-lg text-xs font-bold uppercase"
+            <button key={t}
+              onClick={() => { setTipoBusca(t); setValor(""); setCliente(null); setErro(""); }}
+              className="px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all"
               style={{ backgroundColor: tipoBusca === t ? "#DC2626" : "var(--bg-mid)", color: tipoBusca === t ? "#fff" : "var(--text-muted)" }}
             >{t === "cpf" ? "Por CPF" : "Por Telefone"}</button>
           ))}
@@ -441,66 +507,201 @@ function AbaClientes() {
             onChange={(e) => setValor(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && buscar()}
             placeholder={tipoBusca === "cpf" ? "000.000.000-00" : "(11) 99999-9999"}
-            className="flex-1 px-3 py-2 rounded-lg text-sm"
+            className="flex-1 px-3 py-2.5 rounded-lg text-sm"
             style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
           />
-          <button onClick={buscar} disabled={loading} className="px-5 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626", opacity: loading ? 0.7 : 1 }}>
-            {loading ? "Buscando..." : "Buscar"}
-          </button>
+          <button onClick={buscar} disabled={loading}
+            className="px-6 py-2 rounded-lg text-xs font-bold text-white transition-all"
+            style={{ backgroundColor: "#DC2626", opacity: loading ? 0.65 : 1 }}
+          >{loading ? "Buscando..." : "Buscar"}</button>
         </div>
       </div>
 
+      {loading && <Spinner />}
       {erro && <AlertErro msg={erro} />}
 
-      {cliente && (
-        <div className="space-y-4">
-          {/* Dados pessoais */}
-          <Card>
-            <p className="text-xs font-black uppercase mb-3" style={{ color: "#DC2626" }}>Dados do Cliente</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {info("Nome", cliente.nome ?? cliente.cl_nome)}
-              {info("CPF", cliente.cpf ?? cliente.cl_cpf)}
-              {info("Data de Nascimento", cliente.data_nascimento ?? cliente.dt_nascimento)}
-              {info("Telefone", cliente.telefone ?? cliente.cl_telefone)}
-              {info("E-mail", cliente.email ?? cliente.cl_email)}
-              {info("Sexo", cliente.sexo ?? cliente.cl_sexo)}
-              {info("Cidade", cliente.cidade ?? cliente.cl_cidade)}
-              {info("UF", cliente.uf ?? cliente.cl_uf)}
-              {info("Matrícula", cliente.matricula ?? cliente.cl_matricula)}
-              {info("Espécie/Benefício", cliente.especie ?? cliente.cl_especie)}
-              {info("Renda", formatBRL(cliente.renda ?? cliente.cl_renda))}
-              {info("Margem Disponível", formatBRL(cliente.margem ?? cliente.cl_margem))}
+      {/* ── Painel de diagnóstico — remover após confirmar estrutura ── */}
+      {(debugCliente || debugContratos) && (
+        <div className="rounded-xl overflow-hidden text-xs" style={{ border: "1px solid rgba(234,179,8,0.4)", backgroundColor: "rgba(234,179,8,0.05)" }}>
+          <button
+            onClick={() => setShowDebug((v) => !v)}
+            className="w-full px-4 py-2.5 text-left font-black uppercase tracking-widest flex justify-between"
+            style={{ color: "#eab308" }}
+          >
+            <span>🔍 Diagnóstico API Storm</span>
+            <span>{showDebug ? "▲ ocultar" : "▼ ver JSON bruto"}</span>
+          </button>
+          {showDebug && (
+            <div className="px-4 pb-4 space-y-3">
+              <div>
+                <p className="font-bold mb-1" style={{ color: "#eab308" }}>/clientes/cpf</p>
+                <pre className="text-[10px] overflow-auto max-h-48 p-2 rounded" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)" }}>
+                  {JSON.stringify(debugCliente, null, 2)}
+                </pre>
+              </div>
+              {debugContratos && (
+                <div>
+                  <p className="font-bold mb-1" style={{ color: "#eab308" }}>/contratos?cpf</p>
+                  <pre className="text-[10px] overflow-auto max-h-48 p-2 rounded" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)" }}>
+                    {JSON.stringify(debugContratos, null, 2)}
+                  </pre>
+                </div>
+              )}
             </div>
-          </Card>
+          )}
+        </div>
+      )}
 
-          {/* Contratos do cliente */}
-          {(cliente.contratos ?? cliente.ct_lista ?? []).length > 0 && (
-            <Card>
-              <p className="text-xs font-black uppercase mb-3" style={{ color: "#DC2626" }}>Contratos</p>
-              <div className="space-y-2">
-                {(cliente.contratos ?? cliente.ct_lista).map((ct: AnyData, i: number) => (
-                  <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ backgroundColor: "var(--bg-mid)" }}>
+      {cliente && (
+        <div className="space-y-3">
+
+          {/* ── Hero ── */}
+          <div className="rounded-xl p-5" style={{ background: "linear-gradient(135deg, rgba(220,38,38,0.09) 0%, rgba(220,38,38,0.02) 100%)", border: "1px solid rgba(220,38,38,0.22)" }}>
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-full flex items-center justify-center text-xl font-black text-white flex-shrink-0" style={{ backgroundColor: "#DC2626" }}>
+                {(cliente.nome !== "—" ? cliente.nome[0] : "?").toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg font-black leading-tight" style={{ color: "var(--text-primary)" }}>
+                  {cliente.nome}
+                </h2>
+                <p className="text-sm font-mono mt-0.5" style={{ color: "var(--text-muted)" }}>{cliente.cpf}</p>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {cliente.situacao !== "—" && <Badge label={cliente.situacao} color={situacaoCor(cliente.situacao)} />}
+                  {cliente.especie !== "—" && <Badge label={cliente.especie} color="blue" />}
+                  {cliente.cidade !== "—" && (
+                    <Badge label={`${cliente.cidade}${cliente.uf !== "—" ? ` / ${cliente.uf}` : ""}`} color="gray" />
+                  )}
+                </div>
+              </div>
+              {cliente.margem_disponivel_raw != null && (
+                <div className="text-right flex-shrink-0 pl-4" style={{ borderLeft: "1px solid rgba(220,38,38,0.2)" }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: "var(--text-muted)" }}>Margem Livre</p>
+                  <p className="text-2xl font-black" style={{ color: "#22c55e" }}>{cliente.margem_disponivel}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+            {/* ── Benefício / Matrícula ── */}
+            <Section title="Benefício / Matrícula" accent="#DC2626">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Nascimento"    value={cliente.data_nascimento} />
+                <Field label="Sexo"          value={cliente.sexo} />
+                <Field label="Matrícula"     value={cliente.matricula} mono />
+                <Field label="NB / Benefício" value={cliente.nb} mono />
+                {cliente.especie !== "—" && (
+                  <div className="col-span-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: "var(--text-muted)" }}>Espécie</p>
+                    <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{cliente.especie}</p>
+                  </div>
+                )}
+                <Field label="Banco Pagador" value={cliente.banco_beneficio} omitDash />
+              </div>
+            </Section>
+
+            {/* ── Documentos ── */}
+            <Section title="Documentos" accent="#eab308">
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="RG"            value={cliente.rg} mono />
+                <Field label="Órgão Emissor" value={cliente.orgao_emissor} omitDash />
+                <Field label="UF Documento"  value={cliente.uf_doc} omitDash />
+              </div>
+            </Section>
+
+            {/* ── Contato ── */}
+            <Section title="Contato" accent="#3b82f6">
+              <div className="space-y-3">
+                <Field label="Telefone"   value={cliente.telefone} mono />
+                <Field label="Telefone 2" value={cliente.telefone2} mono omitDash />
+                <Field label="E-mail"     value={cliente.email} omitDash />
+                {cliente.endereco !== "—" && (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: "var(--text-muted)" }}>Endereço</p>
+                    <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{cliente.endereco}</p>
+                  </div>
+                )}
+              </div>
+            </Section>
+
+            {/* ── Financeiro ── */}
+            <Section title="Financeiro" accent="#22c55e">
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase mb-1" style={{ color: "var(--text-muted)" }}>Renda Bruta</p>
+                    <p className="text-lg font-black" style={{ color: "var(--text-primary)" }}>{cliente.renda}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase mb-1" style={{ color: "var(--text-muted)" }}>Margem Disponível</p>
+                    <p className="text-lg font-black" style={{ color: "#22c55e" }}>{cliente.margem_disponivel}</p>
+                  </div>
+                  {cliente.margem_utilizada !== "—" && (
                     <div>
-                      <p className="text-xs font-bold font-mono" style={{ color: "#DC2626" }}>{ct.ff ?? ct.codigo ?? `#${ct.id}`}</p>
-                      <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{ct.banco ?? ct.ba_nome} — {ct.status}</p>
+                      <p className="text-[10px] font-bold uppercase mb-1" style={{ color: "var(--text-muted)" }}>Margem Utilizada</p>
+                      <p className="text-lg font-black" style={{ color: "#eab308" }}>{cliente.margem_utilizada}</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>{formatBRL(ct.valor_negociado ?? ct.valor)}</p>
-                      {ct.valor_parcela && <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{formatBRL(ct.valor_parcela)}/mês</p>}
+                  )}
+                </div>
+                {cliente.percentual_margem_util != null && (
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="text-[10px] font-bold uppercase" style={{ color: "var(--text-muted)" }}>Comprometimento</span>
+                      <span className="text-[10px] font-black" style={{ color: cliente.percentual_margem_util > 75 ? "#DC2626" : "#22c55e" }}>
+                        {cliente.percentual_margem_util}%
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: "var(--bg-mid)" }}>
+                      <div className="h-full rounded-full transition-all" style={{
+                        width: `${cliente.percentual_margem_util}%`,
+                        backgroundColor: cliente.percentual_margem_util > 75 ? "#DC2626" : cliente.percentual_margem_util > 50 ? "#eab308" : "#22c55e"
+                      }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Section>
+
+          </div>
+
+          {/* ── Contratos ── */}
+          {cliente.contratos.length > 0 && (
+            <Section title={`Contratos (${cliente.contratos.length})`} accent="#a855f7">
+              <div className="space-y-2">
+                {cliente.contratos.map((ct, i) => (
+                  <div key={i} className="rounded-xl p-3" style={{ backgroundColor: "var(--bg-mid)" }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className="text-sm font-black font-mono" style={{ color: "#DC2626" }}>{ct.codigo}</span>
+                          <Badge label={ct.status} color="blue" />
+                          {ct.produto !== "—" && <Badge label={ct.produto} color="purple" />}
+                        </div>
+                        <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>
+                          {[ct.banco, ct.convenio].filter((v) => v !== "—").join(" · ")}
+                        </p>
+                        <div className="flex flex-wrap gap-3 text-[10px]" style={{ color: "var(--text-muted)" }}>
+                          {ct.prazo !== "—" && <span>{ct.prazo}</span>}
+                          {ct.taxa !== "—" && <span>{ct.taxa}</span>}
+                          {ct.data_inicio !== "—" && <span>Início: {ct.data_inicio}</span>}
+                          {ct.data_fim !== "—" && <span>Venc: {ct.data_fim}</span>}
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-black" style={{ color: "var(--text-primary)" }}>{ct.valor}</p>
+                        {ct.parcela !== "—" && (
+                          <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{ct.parcela}/mês</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
-            </Card>
+            </Section>
           )}
 
-          {/* JSON bruto se tiver campos não mapeados */}
-          <details className="rounded-xl overflow-hidden" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
-            <summary className="px-4 py-3 text-xs font-semibold cursor-pointer" style={{ color: "var(--text-muted)" }}>Ver resposta completa da Storm</summary>
-            <pre className="px-4 pb-4 text-[10px] overflow-auto max-h-64 whitespace-pre-wrap" style={{ color: "var(--text-muted)" }}>
-              {JSON.stringify(cliente, null, 2)}
-            </pre>
-          </details>
         </div>
       )}
     </div>

@@ -17,7 +17,7 @@ router = APIRouter(prefix="/bancos", tags=["bancos"])
 async def listar_bancos():
     """Lista todos os bancos integrados com metadados básicos."""
     return [
-        {"slug": a.slug, "nome": a.nome, "tipo": a.tipo}
+        {"slug": a.slug, "nome": a.nome, "tipo": a.tipo, "ativo": True}
         for a in list_adapters()
     ]
 

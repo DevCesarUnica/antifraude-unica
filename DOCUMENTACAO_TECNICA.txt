@@ -2,7 +2,7 @@
   SISTEMA ANTIFRAUDE - UNICA PROMOTORA
   DOCUMENTAÇÃO TÉCNICA COMPLETA
 ================================================================================
-  Última atualização: 22/06/2026 (v2.1)
+  Última atualização: 24/06/2026 (v2.2)
   Versão do sistema : 2.0.0
   Repositório       : https://github.com/DevCesarUnica/antifraude-unica
 ================================================================================
@@ -487,14 +487,52 @@ ENDPOINT: GET /bancos/{slug}/referencia?force_refresh=false
   4.12 backend/app/routers/titan.py — Integração Titan
 --------------------------------------------------------------------------------
 
+FUNÇÃO: Proxy que expõe a API Titan para o frontend com autenticação Bearer,
+cache em dois níveis (Redis/SQLite), retry e circuit breaker.
+
+AUTENTICAÇÃO TITAN: header "Authorization: Bearer <TITAN_API_KEY>".
+  (O header "Titan-Api-Key" foi descartado — retornava 403.)
+
+MAPEAMENTO DE ERROS:
+  TitanAuthError (401/403) → HTTP 502  (credencial inválida — não conta como
+                                         falha no circuit breaker)
+  TitanAPIError            → HTTP 503  (serviço externo indisponível)
+
 ENDPOINT: GET /titan/status
-  Retorna o status da integração com a API Titan (credenciais, circuit breaker).
+  Ping real à API Titan com medição de latência.
+  Retorna: circuit_breaker, estado, cache_backend, api_key_configurada, modo,
+           conectividade, latencia_ms, http_status, erro.
 
-ENDPOINT: GET /titan/bancos
-  Lista bancos disponíveis na API Titan.
+ENDPOINT: GET /titan/bancos?force_refresh=false
+  Lista bancos disponíveis na Titan. Campos normalizados: id, codigo, nome.
 
-ENDPOINT: DELETE /titan/cache
-  Invalida o cache local da API Titan.
+ENDPOINT: GET /titan/bancos/{banco_id}/produtos?force_refresh=false
+  Produtos disponíveis para um banco específico.
+  Campos normalizados: id, codigo, nome, tipo_produto.
+  Fallback mock via titan_mock.PRODUTOS_POR_BANCO (ou PRODUTOS_GENERICOS).
+
+ENDPOINT: GET /titan/bancos/{banco_id}/referencia?force_refresh=false
+  Tabelas de referência para preenchimento de proposta (banco específico).
+  Retorna em paralelo com degradação graciosa (campo vira [] se falhar):
+  { produtos, sexos, estados_civis, profissoes }
+
+ENDPOINT: GET /titan/referencia?force_refresh=false
+  Todos os dados de referência em paralelo: bancos, sexos, estados_civis,
+  profissoes, produtos (Daycoval).
+
+ENDPOINT: DELETE /titan/cache?endpoint=<path>
+  Invalida cache Redis/SQLite. Sem parâmetro invalida tudo.
+
+SERVIÇO (services/titan.py):
+  TitanService — cliente assíncrono com:
+    - Cache Redis (preferencial) ou SQLite (fallback)
+    - Retry exponencial via tenacity (3 tentativas, backoff 1-10s)
+    - Circuit breaker próprio (TitanAuthError não conta como falha)
+    - Normalização de resposta: _n_banco(), _n_produto(), _n_item()
+    - Fallback mock por endpoint quando API indisponível (TTL 5 min)
+    - status_async(): ping real com latência medida
+  TitanAuthError — subclasse de TitanAPIError para erros 401/403
+  TitanAPIError  — erro genérico do serviço externo
 
 
 --------------------------------------------------------------------------------
@@ -745,8 +783,14 @@ USO:
 FUNÇÃO: Centraliza toda a comunicação HTTP com o backend FastAPI.
 
 CONFIGURAÇÃO DO AXIOS:
-  baseURL : VITE_API_URL (variável de ambiente) ou "http://localhost:8000"
+  baseURL : VITE_API_URL (variável de ambiente) ou "" (vazio — usa proxy Vite).
   Token   : injetado automaticamente via interceptor de requisição.
+
+PROXY VITE (vite.config.ts):
+  Todas as rotas da API (/auth, /propostas, /titan, /storm, /bancos, etc.)
+  são proxiadas de localhost:3000 para localhost:8000 pelo servidor de
+  desenvolvimento do Vite. Elimina problemas de CORS em dev e permite que
+  baseURL seja "" (vazio).
 
 INTERCEPTOR DE RESPOSTA (tratamento de 401):
   Se status 401 E a URL não começa com "/storm" ou "/titan":
@@ -774,9 +818,12 @@ FUNÇÕES EXPORTADAS:
     desativarRegra(id)                 → DELETE /regras/{id}
 
   Titan:
-    getTitanStatus()                   → GET    /titan/status
-    getTitanBancos()                   → GET    /titan/bancos
-    invalidarCacheTitan()              → DELETE /titan/cache
+    getTitanStatus()                              → GET    /titan/status
+    getTitanBancos(forceRefresh?)                 → GET    /titan/bancos
+    getTitanProdutosBanco(bancoId, forceRefresh?) → GET    /titan/bancos/{id}/produtos
+    getTitanReferenciaBanco(bancoId, force?)       → GET    /titan/bancos/{id}/referencia
+    getTitanReferencia(forceRefresh?)             → GET    /titan/referencia
+    invalidarCacheTitan(endpoint?)                → DELETE /titan/cache
 
   Bancos:
     getBancosIntegracoes()             → GET /bancos/
@@ -1156,9 +1203,12 @@ DOCUMENTAÇÃO INTERATIVA DA API:
   GET    /bancos/{slug}/referencia  Dados de referência (com cache)
 
   TITAN (requerem token):
-  GET    /titan/status              Status da integração Titan
-  GET    /titan/bancos              Lista bancos da Titan
-  DELETE /titan/cache               Invalida cache Titan
+  GET    /titan/status                         Ping real com latência e estado do circuit breaker
+  GET    /titan/bancos                         Lista bancos da Titan (?force_refresh=false)
+  GET    /titan/bancos/{banco_id}/produtos     Produtos de um banco (?force_refresh=false)
+  GET    /titan/bancos/{banco_id}/referencia   Referência completa de um banco (paralela)
+  GET    /titan/referencia                     Todos os dados de referência em paralelo
+  DELETE /titan/cache                          Invalida cache (?endpoint= para parcial)
 
   STORM (requerem token):
   GET    /storm/status              Estado do circuit breaker e token Storm
@@ -1260,6 +1310,27 @@ DOCUMENTAÇÃO INTERATIVA DA API:
         → reprocessa propostas ENFILEIRADA presas há > 5 min
         → marca como ERRO propostas EM_ANALISE travadas há > 10 min
     - Celery Beat configurado com schedule da varredura
+
+  v2.2 — Titan aprimorado + proxy Vite (24/06/2026)
+    BACKEND:
+    - Autenticação Titan corrigida: header "Authorization: Bearer" (Titan-Api-Key
+      retornava 403 — descartado após testes diretos contra a API).
+    - Nova exceção TitanAuthError (subclasse de TitanAPIError): erros 401/403
+      mapeados para HTTP 502 e não contam como falha no circuit breaker.
+    - Normalização de resposta: métodos _n_banco(), _n_produto(), _n_item()
+      garantem campos {id, codigo, nome} consistentes independente da API.
+    - Medição de latência em _fetch() e status_async() (ping real com ms).
+    - Novos endpoints: GET /titan/bancos/{banco_id}/produtos e
+      GET /titan/bancos/{banco_id}/referencia (busca paralela com degradação).
+    - titan_mock.py ampliado: PRODUTOS_GENERICOS e PRODUTOS_POR_BANCO com
+      fallback por padrão de URL /{banco_id}/operations/products.
+    - bancos.py: campo "ativo": True adicionado à listagem de integrações.
+
+    FRONTEND:
+    - vite.config.ts: proxy Vite configurado para todas as rotas da API.
+      Elimina CORS em dev; baseURL do axios agora é "" (vazio).
+    - api.ts: novas funções getTitanProdutosBanco, getTitanReferenciaBanco,
+      getTitanReferencia; getTitanBancos e invalidarCacheTitan com parâmetros.
 
 ================================================================================
   FIM DA DOCUMENTAÇÃO

@@ -57,6 +57,19 @@ DAYCOVAL_PRODUCTS: list[dict] = [
     {"id": 7, "code": "FGTS",           "name": "Antecipação FGTS",         "productType": "FGTS"},
 ]
 
+# Produtos genéricos usados quando o banco não tem catálogo específico no mock
+PRODUTOS_GENERICOS: list[dict] = [
+    {"id": 1, "code": "CONSIG_INSS", "name": "Consignado INSS",    "productType": "CONSIGNADO"},
+    {"id": 2, "code": "CONSIG_GOV",  "name": "Consignado Governo",  "productType": "CONSIGNADO"},
+    {"id": 3, "code": "PORTAB",      "name": "Portabilidade",        "productType": "PORTABILIDADE"},
+    {"id": 4, "code": "FGTS",        "name": "Antecipação FGTS",    "productType": "FGTS"},
+]
+
+# Catálogo por banco_id (int). Bancos não listados recebem PRODUTOS_GENERICOS.
+PRODUTOS_POR_BANCO: dict[int, list[dict]] = {
+    11: DAYCOVAL_PRODUCTS,  # Banco Daycoval (código 707)
+}
+
 ALL: dict = {
     "banks": BANKS,
     "sexes": SEXES,

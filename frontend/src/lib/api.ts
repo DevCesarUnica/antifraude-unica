@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
+  baseURL: import.meta.env.VITE_API_URL || "",
 });
 
 api.interceptors.request.use((config) => {
@@ -69,11 +69,20 @@ export const desativarRegra = (id: string) =>
 export const getTitanStatus = () =>
   api.get("/titan/status").then((r) => r.data);
 
-export const getTitanBancos = () =>
-  api.get("/titan/bancos").then((r) => r.data);
+export const getTitanBancos = (forceRefresh = false) =>
+  api.get("/titan/bancos", { params: { force_refresh: forceRefresh } }).then((r) => r.data);
 
-export const invalidarCacheTitan = () =>
-  api.delete("/titan/cache").then((r) => r.data);
+export const getTitanProdutosBanco = (bancoId: number | string, forceRefresh = false) =>
+  api.get(`/titan/bancos/${bancoId}/produtos`, { params: { force_refresh: forceRefresh } }).then((r) => r.data);
+
+export const getTitanReferenciaBanco = (bancoId: number | string, forceRefresh = false) =>
+  api.get(`/titan/bancos/${bancoId}/referencia`, { params: { force_refresh: forceRefresh } }).then((r) => r.data);
+
+export const getTitanReferencia = (forceRefresh = false) =>
+  api.get("/titan/referencia", { params: { force_refresh: forceRefresh } }).then((r) => r.data);
+
+export const invalidarCacheTitan = (endpoint?: string) =>
+  api.delete("/titan/cache", { params: endpoint ? { endpoint } : {} }).then((r) => r.data);
 
 // ── Bancos ────────────────────────────────────────────────────────────────────
 

@@ -7,6 +7,7 @@ Cache em dois níveis:
 """
 
 import json
+import time
 import asyncio
 from datetime import datetime, timedelta
 from typing import Any
@@ -37,7 +38,7 @@ except ImportError:
     _REDIS_AVAILABLE = False
 
 _redis_client = None
-_redis_failed = False  # Para não tentar reconectar a cada chamada
+_redis_failed = False
 
 
 def _get_redis():
@@ -131,6 +132,11 @@ class TitanAPIError(Exception):
     pass
 
 
+class TitanAuthError(TitanAPIError):
+    """Credencial inválida (401/403) — não conta como falha de serviço."""
+    pass
+
+
 # ── Serviço principal ─────────────────────────────────────────────────────────
 
 class TitanService:
@@ -144,8 +150,11 @@ class TitanService:
 
     BASE_URL = settings.titan_base_url
     HEADERS = {
-        "Titan-Api-Key": settings.titan_api_key,
+        # WWW-Authenticate: Bearer confirmado nos testes diretos contra a API.
+        # O header "Titan-Api-Key" retornava 403 (não reconhecido).
+        "Authorization": f"Bearer {settings.titan_api_key}",
         "Content-Type": "application/json",
+        "Accept": "application/json",
     }
 
     def __init__(self):
@@ -164,6 +173,33 @@ class TitanService:
         if self._client:
             await self._client.aclose()
 
+    # ── Normalização ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _n_banco(b: dict) -> dict:
+        return {
+            "id":     b.get("id"),
+            "codigo": b.get("code") or b.get("codigo"),
+            "nome":   b.get("name") or b.get("nome"),
+        }
+
+    @staticmethod
+    def _n_produto(p: dict) -> dict:
+        return {
+            "id":           p.get("id"),
+            "codigo":       p.get("code") or p.get("codigo"),
+            "nome":         p.get("name") or p.get("nome"),
+            "tipo_produto": p.get("productType") or p.get("tipo_produto") or p.get("tipo"),
+        }
+
+    @staticmethod
+    def _n_item(item: dict) -> dict:
+        return {
+            "id":     item.get("id"),
+            "codigo": item.get("code") or item.get("codigo"),
+            "nome":   item.get("name") or item.get("nome"),
+        }
+
     # ── Fetch com retry + circuit breaker ─────────────────────────────────────
 
     @retry(
@@ -175,17 +211,29 @@ class TitanService:
     )
     async def _fetch(self, endpoint: str) -> Any:
         async def _call():
+            t0 = time.monotonic()
             log.info("titan.request", endpoint=endpoint)
             resp = await self._client.get(endpoint)
-            # 401/403 = chave inválida; não adianta fazer retry
+            latencia_ms = round((time.monotonic() - t0) * 1000, 1)
+            log.info(
+                "titan.response",
+                endpoint=endpoint,
+                status=resp.status_code,
+                latencia_ms=latencia_ms,
+            )
             if resp.status_code in (401, 403):
-                raise TitanAPIError(f"Titan API: credencial inválida (HTTP {resp.status_code})")
+                raise TitanAuthError(
+                    f"Titan API: credencial inválida (HTTP {resp.status_code})"
+                )
             resp.raise_for_status()
             return resp.json()
 
         try:
-            return await self._breaker.chamar_async(_call)
-        except TitanAPIError:
+            # TitanAuthError não conta como falha de serviço no circuit breaker
+            return await self._breaker.chamar_async(
+                _call, ignorar_excecoes=(TitanAuthError,)
+            )
+        except (TitanAPIError, TitanAuthError):
             raise
         except CircuitBreakerAberto as exc:
             log.error("titan.circuit_breaker_open", endpoint=endpoint, error=str(exc))
@@ -218,46 +266,7 @@ class TitanService:
         else:
             _sqlite_set(endpoint, data)
 
-    async def _get(self, endpoint: str, force_refresh: bool = False) -> Any:
-        if not force_refresh:
-            cached = await self._get_cached(endpoint)
-            if cached is not None:
-                return cached
-
-        try:
-            data = await self._fetch(endpoint)
-        except TitanAPIError as exc:
-            # Chave inválida ou API indisponível — usa dados mock temporariamente
-            mock_data = self._get_mock(endpoint)
-            if mock_data is not None:
-                log.warning(
-                    "titan.usando_mock",
-                    endpoint=endpoint,
-                    motivo=str(exc),
-                )
-                # Salva no cache com TTL curto (5 min) para não poluir dados reais
-                await self._set_cache_ttl(endpoint, mock_data, ttl=300)
-                return mock_data
-            raise
-
-        await self._set_cache(endpoint, data)
-        log.info("titan.fetched", endpoint=endpoint, count=len(data) if isinstance(data, list) else 1)
-        return data
-
-    def _get_mock(self, endpoint: str) -> Any | None:
-        """Retorna dados mock para o endpoint, ou None se não houver mock."""
-        from app.services import titan_mock as _mock
-        _map = {
-            "/banks":                       _mock.BANKS,
-            "/sexes":                       _mock.SEXES,
-            "/civil-statueses":             _mock.CIVIL_STATUSES,
-            "/professions":                 _mock.PROFESSIONS,
-            "/daycoval/operations/products": _mock.DAYCOVAL_PRODUCTS,
-        }
-        return _map.get(endpoint)
-
     async def _set_cache_ttl(self, endpoint: str, data: Any, ttl: int) -> None:
-        """Salva no cache com TTL customizado (usado para mocks)."""
         redis = _get_redis()
         if redis is not None:
             redis.setex(
@@ -285,22 +294,81 @@ class TitanService:
             finally:
                 db.close()
 
+    def _get_mock(self, endpoint: str) -> Any | None:
+        from app.services import titan_mock as _mock
+        _exact = {
+            "/banks":                        _mock.BANKS,
+            "/sexes":                        _mock.SEXES,
+            "/civil-statueses":              _mock.CIVIL_STATUSES,
+            "/professions":                  _mock.PROFESSIONS,
+            "/daycoval/operations/products": _mock.DAYCOVAL_PRODUCTS,
+        }
+        if endpoint in _exact:
+            return _exact[endpoint]
+
+        # Padrão: /{banco_id}/operations/products
+        parts = endpoint.strip("/").split("/")
+        if len(parts) >= 3 and parts[-1] == "products" and parts[-2] == "operations":
+            banco_id = parts[0]
+            try:
+                return _mock.PRODUTOS_POR_BANCO.get(int(banco_id)) or _mock.PRODUTOS_GENERICOS
+            except ValueError:
+                return _mock.PRODUTOS_POR_BANCO.get(banco_id) or _mock.PRODUTOS_GENERICOS
+
+        return None
+
+    async def _get(self, endpoint: str, force_refresh: bool = False) -> Any:
+        if not force_refresh:
+            cached = await self._get_cached(endpoint)
+            if cached is not None:
+                return cached
+
+        try:
+            data = await self._fetch(endpoint)
+        except TitanAPIError as exc:
+            mock_data = self._get_mock(endpoint)
+            if mock_data is not None:
+                log.warning("titan.usando_mock", endpoint=endpoint, motivo=str(exc))
+                await self._set_cache_ttl(endpoint, mock_data, ttl=300)
+                return mock_data
+            raise
+
+        await self._set_cache(endpoint, data)
+        log.info(
+            "titan.fetched",
+            endpoint=endpoint,
+            count=len(data) if isinstance(data, list) else 1,
+        )
+        return data
+
     # ── Endpoints públicos ─────────────────────────────────────────────────────
 
     async def get_banks(self, force_refresh: bool = False) -> list[dict]:
-        return await self._get("/banks", force_refresh)
+        data = await self._get("/banks", force_refresh)
+        return [self._n_banco(b) for b in (data if isinstance(data, list) else [])]
 
     async def get_sexes(self, force_refresh: bool = False) -> list[dict]:
-        return await self._get("/sexes", force_refresh)
+        data = await self._get("/sexes", force_refresh)
+        return [self._n_item(s) for s in (data if isinstance(data, list) else [])]
 
     async def get_civil_statuses(self, force_refresh: bool = False) -> list[dict]:
-        return await self._get("/civil-statueses", force_refresh)
+        data = await self._get("/civil-statueses", force_refresh)
+        return [self._n_item(s) for s in (data if isinstance(data, list) else [])]
 
     async def get_professions(self, force_refresh: bool = False) -> list[dict]:
-        return await self._get("/professions", force_refresh)
+        data = await self._get("/professions", force_refresh)
+        return [self._n_item(p) for p in (data if isinstance(data, list) else [])]
 
     async def get_daycoval_products(self, force_refresh: bool = False) -> list[dict]:
-        return await self._get("/daycoval/operations/products", force_refresh)
+        data = await self._get("/daycoval/operations/products", force_refresh)
+        return [self._n_produto(p) for p in (data if isinstance(data, list) else [])]
+
+    async def get_produtos_banco(
+        self, banco_id: str | int, force_refresh: bool = False
+    ) -> list[dict]:
+        endpoint = f"/{banco_id}/operations/products"
+        data = await self._get(endpoint, force_refresh)
+        return [self._n_produto(p) for p in (data if isinstance(data, list) else [])]
 
     async def get_all(self, force_refresh: bool = False) -> dict:
         """Busca todos os dados de referência em paralelo."""
@@ -336,6 +404,32 @@ class TitanService:
             _sqlite_delete(endpoint)
         log.info("titan.cache_invalidated", endpoint=endpoint or "all")
 
+    async def get_referencia_banco(
+        self, banco_id: str | int, force_refresh: bool = False
+    ) -> dict:
+        """Tabelas de referência para preenchimento de proposta de um banco específico."""
+        resultados = await asyncio.gather(
+            self.get_produtos_banco(banco_id, force_refresh),
+            self.get_sexes(force_refresh),
+            self.get_civil_statuses(force_refresh),
+            self.get_professions(force_refresh),
+            return_exceptions=True,
+        )
+        keys = ["produtos", "sexos", "estados_civis", "profissoes"]
+        output: dict[str, Any] = {}
+        for key, result in zip(keys, resultados):
+            if isinstance(result, Exception):
+                log.error(
+                    "titan.referencia_banco_partial_failure",
+                    campo=key,
+                    banco_id=banco_id,
+                    error=str(result),
+                )
+                output[key] = []
+            else:
+                output[key] = result
+        return output
+
     # ── Status ─────────────────────────────────────────────────────────────────
 
     def status(self) -> dict:
@@ -343,8 +437,52 @@ class TitanService:
         api_key_ok = settings.titan_api_key not in ("123", "", "sua-chave-aqui")
         return {
             "circuit_breaker": repr(self._breaker),
-            "estado": self._breaker.estado,
-            "cache_backend": "redis" if redis is not None else "sqlite",
+            "estado":              self._breaker.estado,
+            "cache_backend":       "redis" if redis is not None else "sqlite",
             "api_key_configurada": api_key_ok,
-            "modo": "real" if api_key_ok else "mock",
+            "modo":                "real" if api_key_ok else "mock",
         }
+
+    async def status_async(self) -> dict:
+        """Retorna status completo incluindo ping real à API Titan com medição de latência."""
+        redis = _get_redis()
+        api_key_ok = settings.titan_api_key not in ("123", "", "sua-chave-aqui")
+        estado_atual = str(self._breaker.estado)
+
+        resultado: dict[str, Any] = {
+            "circuit_breaker":     repr(self._breaker),
+            "estado":              self._breaker.estado,
+            "cache_backend":       "redis" if redis is not None else "sqlite",
+            "api_key_configurada": api_key_ok,
+            "modo":                "real" if api_key_ok else "mock",
+            "conectividade":       None,
+            "latencia_ms":         None,
+            "http_status":         None,
+            "erro":                None,
+        }
+
+        if not api_key_ok:
+            resultado["conectividade"] = "sem_chave_api"
+        elif estado_atual == "OPEN":
+            resultado["conectividade"] = "circuit_breaker_open"
+        else:
+            try:
+                t0 = time.monotonic()
+                resp = await self._client.get(
+                    "/banks", timeout=httpx.Timeout(5.0)
+                )
+                latencia_ms = round((time.monotonic() - t0) * 1000, 1)
+                resultado["conectividade"] = "ok" if resp.status_code < 400 else "degradado"
+                resultado["latencia_ms"]   = latencia_ms
+                resultado["http_status"]   = resp.status_code
+                log.info(
+                    "titan.status_ping",
+                    latencia_ms=latencia_ms,
+                    http_status=resp.status_code,
+                )
+            except Exception as exc:
+                resultado["conectividade"] = "erro"
+                resultado["erro"]          = str(exc)
+                log.warning("titan.status_ping_erro", error=str(exc))
+
+        return resultado

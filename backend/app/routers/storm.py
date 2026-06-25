@@ -209,6 +209,31 @@ async def obter_colaborador(colaborador_id: int):
         _handle_error(exc)
 
 
+# ── Parceiros ─────────────────────────────────────────────────────────────────
+
+@router.get("/parceiros")
+async def listar_parceiros(
+    pagina: int = Query(1, ge=1),
+    nome: str | None = None,
+    cpf_cnpj: str | None = None,
+    status: str | None = None,
+):
+    try:
+        async with StormService() as storm:
+            return await storm.get_parceiros(pagina, nome, cpf_cnpj, status)
+    except StormAPIError as exc:
+        _handle_error(exc)
+
+
+@router.get("/parceiros/{parceiro_id}")
+async def obter_parceiro(parceiro_id: int):
+    try:
+        async with StormService() as storm:
+            return await storm.get_parceiro(parceiro_id)
+    except StormAPIError as exc:
+        _handle_error(exc)
+
+
 # ── Simulações ────────────────────────────────────────────────────────────────
 
 @router.get("/simulacoes/clt")

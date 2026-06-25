@@ -373,6 +373,25 @@ class StormService:
     async def get_colaborador(self, colaborador_id: int) -> Any:
         return await self._chamar_com_retry_get(f"/colaboradores/{colaborador_id}")
 
+    async def get_parceiros(
+        self,
+        pagina: int = 1,
+        nome: str | None = None,
+        cpf_cnpj: str | None = None,
+        status: str | None = None,
+    ) -> Any:
+        params: dict[str, Any] = {"pagina": pagina}
+        if nome:
+            params["nome"] = nome
+        if cpf_cnpj:
+            params["cpf_cnpj"] = cpf_cnpj
+        if status:
+            params["status"] = status
+        return await self._chamar_com_retry_get("/parceiros", params)
+
+    async def get_parceiro(self, parceiro_id: int) -> Any:
+        return await self._chamar_com_retry_get(f"/parceiros/{parceiro_id}")
+
     # ── Simulações ────────────────────────────────────────────────────────────
 
     async def simular_clt(

@@ -172,6 +172,12 @@ export const getStormColaboradores = (params?: { pagina?: number; usuario?: stri
 export const getStormColaborador = (id: number) =>
   api.get(`/storm/colaboradores/${id}`).then((r) => r.data);
 
+export const getStormParceiros = (params?: { pagina?: number; nome?: string; cpf_cnpj?: string; status?: string }) =>
+  api.get("/storm/parceiros", { params }).then((r) => r.data);
+
+export const getStormParceiro = (id: number) =>
+  api.get(`/storm/parceiros/${id}`).then((r) => r.data);
+
 export const simularCLTStorm = (cpf: string, banco_id: number, valor_solicitado?: number, matricula?: string) =>
   api.get("/storm/simulacoes/clt", { params: { cpf, banco_id, valor_solicitado, matricula } }).then((r) => r.data);
 

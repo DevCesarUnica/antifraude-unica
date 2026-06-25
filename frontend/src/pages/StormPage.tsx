@@ -19,6 +19,8 @@ import {
   getStormClienteTelefone,
   getStormColaboradores,
   getStormColaborador,
+  getStormParceiros,
+  getStormParceiro,
   getStormBancos,
   getStormOrgaos,
   simularCLTStorm,
@@ -43,9 +45,9 @@ const TABS: { id: Tab; label: string }[] = [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyData = any;
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+function Card({ children, className = "", onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
   return (
-    <div className={`rounded-xl p-4 ${className}`} style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+    <div className={`rounded-xl p-4 ${className}`} style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }} onClick={onClick}>
       {children}
     </div>
   );
@@ -940,90 +942,174 @@ function AbaClientes() {
 
 // ── Aba Colaboradores ─────────────────────────────────────────────────────────
 
+type SubAbaColab = "parceiros" | "colaboradores";
+
+function avatarIniciais(nome: string): string {
+  const parts = nome.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return (parts[0]?.[0] ?? "?").toUpperCase();
+}
+
+function statusCorColab(s: string): "green" | "red" | "gray" {
+  const v = String(s).toLowerCase();
+  if (v === "ativo" || v === "1" || v === "true") return "green";
+  if (v === "inativo" || v === "0" || v === "false") return "red";
+  return "gray";
+}
+
+function normColab(c: AnyData) {
+  return {
+    id:       c.id       ?? c.op_id  ?? c.pa_id  ?? c.par_id  ?? null,
+    nome:     c.nome     ?? c.op_nome ?? c.pa_nome ?? c.par_nome ?? c.usuario ?? c.login ?? "—",
+    login:    c.usuario  ?? c.login  ?? c.op_usuario ?? "",
+    email:    c.email    ?? c.op_email ?? c.pa_email ?? "",
+    telefone: c.telefone ?? c.celular ?? c.pa_telefone ?? c.fone ?? "",
+    cpf_cnpj: c.cpf      ?? c.cnpj   ?? c.cpf_cnpj   ?? c.pa_cpf ?? "",
+    status:   String(c.status ?? c.status_usuario ?? c.situacao ?? c.ativo ?? ""),
+    tipo:     c.tipo     ?? c.perfil  ?? c.privilegio  ?? c.categoria ?? c.pa_tipo ?? "",
+    cidade:   c.cidade   ?? c.pa_cidade ?? c.municipio ?? "",
+    uf:       c.uf       ?? c.estado  ?? c.pa_uf ?? "",
+  };
+}
+
 function AbaColaboradores() {
-  const [colaboradores, setColaboradores] = useState<AnyData[]>([]);
-  const [detalhe, setDetalhe] = useState<AnyData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [sub, setSub]                   = useState<SubAbaColab>("parceiros");
+  const [items, setItems]               = useState<AnyData[]>([]);
+  const [detalhe, setDetalhe]           = useState<AnyData | null>(null);
+  const [detalheNome, setDetalheNome]   = useState("");
+  const [loading, setLoading]           = useState(false);
   const [loadingDetalhe, setLoadingDetalhe] = useState(false);
-  const [busca, setBusca] = useState("");
-  const [pagina, setPagina] = useState(1);
-  const [erro, setErro] = useState("");
+  const [busca, setBusca]               = useState("");
+  const [pagina, setPagina]             = useState(1);
+  const [erro, setErro]                 = useState("");
 
   const buscar = useCallback(async () => {
     setLoading(true); setErro("");
     try {
-      const data = await getStormColaboradores({ pagina, usuario: busca || undefined });
-      setColaboradores(normalize(data, ["colaboradores", "operadores", "items"]));
+      let data: AnyData;
+      if (sub === "parceiros") {
+        data = await getStormParceiros({ pagina, nome: busca || undefined });
+        console.log("[Storm parceiros raw]:", JSON.stringify(data, null, 2));
+        setItems(normalize(data, ["parceiros", "corretores", "correspondentes", "items", "data"]));
+      } else {
+        data = await getStormColaboradores({ pagina, usuario: busca || undefined });
+        console.log("[Storm colaboradores raw]:", JSON.stringify(data, null, 2));
+        setItems(normalize(data, ["colaboradores", "operadores", "usuarios", "items", "data"]));
+      }
     } catch (e: AnyData) {
-      setErro(e?.response?.data?.detail ?? "Erro ao buscar colaboradores");
+      console.error(`[Storm ${sub} erro]:`, e?.response?.data ?? e);
+      setErro(e?.response?.data?.detail ?? `Erro ao buscar ${sub}`);
+      setItems([]);
     } finally { setLoading(false); }
-  }, [pagina, busca]);
+  }, [sub, pagina, busca]);
 
-  useEffect(() => { buscar(); }, [buscar]);
+  useEffect(() => {
+    setItems([]); setErro(""); setPagina(1);
+  }, [sub]);
 
-  const verDetalhe = async (id: number) => {
-    setDetalhe(null); setLoadingDetalhe(true);
-    try { setDetalhe(await getStormColaborador(id)); }
-    catch { setDetalhe({}); }
-    finally { setLoadingDetalhe(false); }
+  const verDetalhe = async (c: AnyData) => {
+    const norm = normColab(c);
+    setDetalheNome(norm.nome);
+    setDetalhe(null);
+    setLoadingDetalhe(true);
+    try {
+      const data = sub === "parceiros"
+        ? await getStormParceiro(norm.id)
+        : await getStormColaborador(norm.id);
+      console.log(`[Storm detalhe ${sub} raw]:`, JSON.stringify(data, null, 2));
+      setDetalhe(data ?? c);
+    } catch {
+      setDetalhe(c);
+    } finally { setLoadingDetalhe(false); }
   };
 
-  const statusColor = (s: string): "green" | "gray" => (s?.toLowerCase() === "ativo" ? "green" : "gray");
+  const tabBtnStyle = (ativo: boolean): React.CSSProperties => ({
+    padding: "6px 16px", borderRadius: 8, fontSize: 11, fontWeight: 700,
+    backgroundColor: ativo ? "#DC2626" : "var(--bg-mid)",
+    color: ativo ? "#fff" : "var(--text-muted)",
+    border: "none", cursor: "pointer", transition: "all .15s",
+  });
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
-        <input value={busca} onChange={(e) => setBusca(e.target.value)} onKeyDown={(e) => e.key === "Enter" && buscar()} placeholder="Buscar por usuário ou nome..." className="flex-1 min-w-40 px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
-        <button onClick={() => { setPagina(1); buscar(); }} className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Buscar</button>
-        <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => setPagina((p) => p + 1)} />
+      {/* Barra de controles */}
+      <div className="p-4 rounded-xl space-y-3" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+        {/* Sub-abas */}
+        <div className="flex gap-2">
+          <button style={tabBtnStyle(sub === "parceiros")} onClick={() => setSub("parceiros")}>Parceiros</button>
+          <button style={tabBtnStyle(sub === "colaboradores")} onClick={() => setSub("colaboradores")}>Colaboradores</button>
+        </div>
+
+        {/* Busca + ação */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && buscar()}
+            placeholder={sub === "parceiros" ? "Buscar por nome ou CPF/CNPJ..." : "Buscar por usuário ou nome..."}
+            className="flex-1 min-w-44 px-3 py-2 rounded-lg text-xs"
+            style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+          />
+          <button onClick={() => { setPagina(1); buscar(); }} className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>
+            Buscar
+          </button>
+          <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => { setPagina((p) => p + 1); }} />
+        </div>
       </div>
 
       {erro && <AlertErro msg={erro} />}
-      {loading ? <Spinner /> : colaboradores.length === 0 ? <EmptyState msg="Nenhum colaborador encontrado." /> : (
+
+      {loading ? <Spinner /> : items.length === 0 ? (
+        <EmptyState msg={`Clique em "Buscar" para carregar ${sub === "parceiros" ? "parceiros" : "colaboradores"}.`} />
+      ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {colaboradores.map((c: AnyData, i: number) => (
-            <Card key={c.op_id ?? c.id ?? i} className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-black text-white flex-shrink-0" style={{ backgroundColor: "#DC2626" }}>
-                {(c.op_nome ?? c.nome ?? c.usuario ?? "?")[0]?.toUpperCase()}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold truncate" style={{ color: "var(--text-primary)" }}>{c.op_nome ?? c.nome ?? "—"}</p>
-                <p className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>{c.op_usuario ?? c.usuario ?? "—"}</p>
-                <p className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>{c.op_email ?? c.email ?? ""}</p>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {c.status_usuario && <Badge label={c.status_usuario} color={statusColor(c.status_usuario)} />}
-                  {c.privilegio && <Badge label={c.privilegio} color="blue" />}
-                  {c.perfil && <Badge label={c.perfil} color="purple" />}
+          {items.map((raw: AnyData, i: number) => {
+            const c = normColab(raw);
+            const cor = statusCorColab(c.status);
+            return (
+              <Card key={c.id ?? i} className="flex items-start gap-3 cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => verDetalhe(raw)}>
+                {/* Avatar */}
+                <div className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-black text-white flex-shrink-0"
+                  style={{ backgroundColor: cor === "green" ? "#16a34a" : cor === "red" ? "#DC2626" : "#64748b" }}>
+                  {avatarIniciais(c.nome !== "—" ? c.nome : "?")}
                 </div>
-                <button onClick={() => verDetalhe(c.op_id ?? c.id)} className="text-[10px] mt-2 font-semibold" style={{ color: "#3b82f6" }}>Ver detalhes</button>
-              </div>
-            </Card>
-          ))}
+
+                {/* Info */}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold truncate" style={{ color: "var(--text-primary)" }}>{c.nome}</p>
+                  {c.login && <p className="text-[10px] font-mono truncate" style={{ color: "var(--text-muted)" }}>{c.login}</p>}
+                  {c.email && <p className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>{c.email}</p>}
+                  {c.telefone && <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{c.telefone}</p>}
+                  {(c.cidade || c.uf) && (
+                    <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                      {[c.cidade, c.uf].filter(Boolean).join(" – ")}
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {c.status && <Badge label={c.status} color={cor} />}
+                    {c.tipo && <Badge label={c.tipo} color="blue" />}
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
         </div>
       )}
 
-      {/* Modal detalhe colaborador */}
+      {/* Modal detalhe */}
       {(detalhe !== null || loadingDetalhe) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.65)" }}>
-          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
-            {loadingDetalhe ? <Spinner /> : (
-              <>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-black" style={{ color: "var(--text-primary)" }}>Detalhe do Colaborador</h3>
-                  <button onClick={() => setDetalhe(null)} className="text-xs px-3 py-1.5 rounded-lg" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)" }}>Fechar</button>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {Object.entries(detalhe ?? {}).filter(([, v]) => v != null && typeof v !== "object").map(([k, v]) => (
-                    <div key={k}>
-                      <p className="text-[10px] font-bold uppercase" style={{ color: "var(--text-muted)" }}>{k.replace(/_/g, " ")}</p>
-                      <p className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{String(v)}</p>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
+        <ModalOverlay onClose={() => { if (!loadingDetalhe) setDetalhe(null); }}>
+          <ModalHeader
+            title={sub === "parceiros" ? "Detalhe do Parceiro" : "Detalhe do Colaborador"}
+            ff={detalheNome}
+            onClose={() => setDetalhe(null)}
+          />
+          <div className="overflow-y-auto flex-1 px-5 py-4">
+            {loadingDetalhe ? <Spinner /> : <AcompanhamentoView data={detalhe} />}
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

@@ -282,16 +282,22 @@ function AbaAntifraude() {
   const [msg, setMsg] = useState("");
   const [erro, setErro] = useState("");
 
+  const BANCO_ATIVO = "HOPE";
+
   const buscar = useCallback(async () => {
     setLoading(true); setErro("");
     try {
       const data = await getStormAntifraude(esteira, pagina);
-      const lista = normalize(data, ["contratos", "items", "data"]);
+      const todos = normalize(data, ["contratos", "items", "data"]);
+      // Exibe apenas contratos do banco configurado (HOPE)
+      const lista = todos.filter((c: AnyData) => {
+        const nomeBanco = (stormStr(c.banco) ?? stormStr(c.ba_nome) ?? "").toUpperCase();
+        return nomeBanco.includes(BANCO_ATIVO);
+      });
       setContratos(lista);
-      // Calcula stats da lista carregada
-      const pendentes   = lista.filter((c: AnyData) => /(pendente|analise|análise)/i.test(c.status ?? "")).length;
-      const aprovados   = lista.filter((c: AnyData) => /aprovad/i.test(c.status ?? "")).length;
-      const recusados   = lista.filter((c: AnyData) => /(recusad|negad)/i.test(c.status ?? "")).length;
+      const pendentes = lista.filter((c: AnyData) => /(pendente|analise|análise)/i.test(String(c.status ?? ""))).length;
+      const aprovados = lista.filter((c: AnyData) => /aprovad/i.test(String(c.status ?? ""))).length;
+      const recusados = lista.filter((c: AnyData) => /(recusad|negad)/i.test(String(c.status ?? ""))).length;
       setStats({ pendentes, aprovados, recusados, em_analise: lista.length - pendentes - aprovados - recusados });
     } catch (e: AnyData) {
       setErro(e?.response?.data?.detail ?? "Erro ao buscar contratos antifraude");

@@ -128,10 +128,12 @@ async def listar_contratos(
     ff: str | None = None,
     id_banco: int | None = None,
     id_status: int | None = None,
+    data_inicio: str | None = None,
+    data_fim: str | None = None,
 ):
     try:
         async with StormService() as storm:
-            return await storm.get_contratos(pagina, cpf, ff, id_banco, id_status)
+            return await storm.get_contratos(pagina, cpf, ff, id_banco, id_status, data_inicio, data_fim)
     except StormAPIError as exc:
         _handle_error(exc)
 

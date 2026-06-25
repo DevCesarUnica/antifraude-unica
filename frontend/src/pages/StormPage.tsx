@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import Layout from "../components/Layout";
-import { mergeClienteAndContratos, stormErro, type ClienteNorm } from "../lib/storm-utils";
+import { mergeClienteAndContratos, normalizeContratoLista, stormErro, type ClienteNorm, type ContratoListaItem } from "../lib/storm-utils";
 import {
   getStormStatus,
   resetarCircuitBreakerStorm,
@@ -309,7 +309,7 @@ function AbaAntifraude() {
 // ── Aba Contratos ─────────────────────────────────────────────────────────────
 
 function AbaContratos() {
-  const [contratos, setContratos] = useState<AnyData[]>([]);
+  const [contratos, setContratos] = useState<ContratoListaItem[]>([]);
   const [statusList, setStatusList] = useState<AnyData[]>([]);
   const [bancos, setBancos] = useState<AnyData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -346,7 +346,9 @@ function AbaContratos() {
         data_inicio: dataInicio || undefined,
         data_fim: dataFim || undefined,
       });
-      setContratos(normalize(data, ["contratos", "items", "data"]));
+      const raw = normalize(data, ["contratos", "items", "data"]);
+      console.log("[Storm /contratos raw] primeiro item:", JSON.stringify(raw[0], null, 2));
+      setContratos(raw.map(normalizeContratoLista));
     } catch (e: AnyData) {
       setErro(e?.response?.data?.detail ?? "Erro ao buscar contratos");
     } finally { setLoading(false); }
@@ -427,24 +429,24 @@ function AbaContratos() {
               </tr>
             </thead>
             <tbody>
-              {contratos.map((c: AnyData, i: number) => (
-                <tr key={c.ct_id ?? c.id ?? i} style={{ borderBottom: "1px solid var(--border)" }}>
-                  <td className="px-3 py-2.5 font-mono font-bold" style={{ color: "#DC2626" }}>{c.ff ?? c.codigo ?? `#${c.ct_id ?? c.id}`}</td>
-                  <td className="px-3 py-2.5 font-medium" style={{ color: "var(--text-primary)" }}>{c.cliente ?? c.cl_nome ?? "—"}</td>
-                  <td className="px-3 py-2.5 font-mono" style={{ color: "var(--text-muted)" }}>{c.cpf_cliente ?? c.cpf ?? "—"}</td>
-                  <td className="px-3 py-2.5" style={{ color: "var(--text-muted)" }}>{stormStr(c.banco) ?? stormStr(c.ba_nome) ?? "—"}</td>
-                  <td className="px-3 py-2.5" style={{ color: "var(--text-muted)" }}>{stormStr(c.convenio) ?? stormStr(c.co_nome) ?? "—"}</td>
-                  <td className="px-3 py-2.5 font-bold" style={{ color: "var(--text-primary)" }}>{formatBRL(c.valor_negociado ?? c.valor)}</td>
+              {contratos.map((c, i) => (
+                <tr key={c.ff || i} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td className="px-3 py-2.5 font-mono font-bold" style={{ color: "#DC2626" }}>{c.ff}</td>
+                  <td className="px-3 py-2.5 font-medium" style={{ color: "var(--text-primary)" }}>{c.nome_cliente}</td>
+                  <td className="px-3 py-2.5 font-mono" style={{ color: "var(--text-muted)" }}>{c.cpf_cliente}</td>
+                  <td className="px-3 py-2.5" style={{ color: "var(--text-muted)" }}>{c.banco}</td>
+                  <td className="px-3 py-2.5" style={{ color: "var(--text-muted)" }}>{c.convenio}</td>
+                  <td className="px-3 py-2.5 font-bold" style={{ color: "var(--text-primary)" }}>{c.valor}</td>
                   <td className="px-3 py-2.5">
-                    {c.status ? <Badge label={String(c.status)} color="blue" /> : "—"}
+                    {c.status !== "—" ? <Badge label={c.status} color="blue" /> : "—"}
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex gap-1.5">
-                      {(c.ff || c.codigo) && (
-                        <button onClick={() => verAcompanhamento(c.ff ?? c.codigo)} className="px-2 py-1 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(34,197,94,0.12)", color: "#22c55e" }}>Acomp.</button>
+                      {c.ff !== "—" && (
+                        <button onClick={() => verAcompanhamento(c.ff)} className="px-2 py-1 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(34,197,94,0.12)", color: "#22c55e" }}>Acomp.</button>
                       )}
-                      {(c.ff || c.codigo) && (
-                        <button onClick={() => verHistorico(c.ff ?? c.codigo)} className="px-2 py-1 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(59,130,246,0.12)", color: "#3b82f6" }}>Histórico</button>
+                      {c.ff !== "—" && (
+                        <button onClick={() => verHistorico(c.ff)} className="px-2 py-1 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(59,130,246,0.12)", color: "#3b82f6" }}>Histórico</button>
                       )}
                     </div>
                   </td>

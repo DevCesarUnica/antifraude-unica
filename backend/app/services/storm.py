@@ -314,6 +314,8 @@ class StormService:
         ff: str | None = None,
         id_banco: int | None = None,
         id_status: int | None = None,
+        data_inicio: str | None = None,
+        data_fim: str | None = None,
     ) -> Any:
         params: dict[str, Any] = {"pagina": pagina}
         if cpf:
@@ -327,6 +329,10 @@ class StormService:
             params["id_banco"] = id_banco
         if id_status is not None:
             params["id_status"] = id_status
+        if data_inicio:
+            params["data_inicio"] = data_inicio
+        if data_fim:
+            params["data_fim"] = data_fim
         return await self._chamar_com_retry_get("/contratos", params)
 
     async def get_historico_contrato(self, ff: str) -> Any:

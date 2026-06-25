@@ -459,6 +459,51 @@ export function mergeClienteAndContratos(
   };
 }
 
+// ── normalizeContratoLista ────────────────────────────────────────────────────
+// Usado em AbaContratos (/contratos) — inclui dados do cliente embutidos.
+
+export interface ContratoListaItem {
+  ff: string;
+  nome_cliente: string;
+  cpf_cliente: string;
+  banco: string;
+  convenio: string;
+  valor: string;
+  valor_raw: number | null;
+  status: string;
+  data: string;
+}
+
+export function normalizeContratoLista(raw: Raw): ContratoListaItem {
+  const base = normContrato(raw);
+
+  // /contratos embute o cliente em cliente_contrato
+  const cc = obj(raw, "cliente_contrato");
+  const nome_cliente = dash(
+    pick(cc, "nome") ||
+    pick(raw, "nome_cliente", "cl_nome")
+  );
+  const cpf_cliente = dash(
+    pick(cc, "cpf") ||
+    pick(raw, "cpf", "cpf_cliente", "cl_cpf")
+  );
+
+  // convenio vem de operacao.nome em /contratos
+  const convenio = base.convenio !== "—" ? base.convenio : base.produto;
+
+  return {
+    ff: base.codigo,
+    nome_cliente,
+    cpf_cliente,
+    banco: base.banco,
+    convenio,
+    valor: base.valor,
+    valor_raw: base.valor_raw,
+    status: base.status,
+    data: base.data_inicio,
+  };
+}
+
 // ── stormErro ─────────────────────────────────────────────────────────────────
 
 export function stormErro(response: unknown): string | null {

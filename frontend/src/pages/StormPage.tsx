@@ -973,7 +973,7 @@ function normColab(c: AnyData) {
 }
 
 function AbaColaboradores() {
-  const [sub, setSub]                   = useState<SubAbaColab>("parceiros");
+  const [sub, setSub]                   = useState<SubAbaColab>("colaboradores");
   const [items, setItems]               = useState<AnyData[]>([]);
   const [detalhe, setDetalhe]           = useState<AnyData | null>(null);
   const [detalheNome, setDetalheNome]   = useState("");
@@ -983,29 +983,37 @@ function AbaColaboradores() {
   const [pagina, setPagina]             = useState(1);
   const [erro, setErro]                 = useState("");
 
-  const buscar = useCallback(async () => {
+  // Recebe pagina/busca/sub como parâmetros para evitar closure stale
+  const executarBusca = useCallback(async (
+    paginaAtual: number,
+    buscaAtual: string,
+    subAtual: SubAbaColab,
+  ) => {
     setLoading(true); setErro("");
     try {
       let data: AnyData;
-      if (sub === "parceiros") {
-        data = await getStormParceiros({ pagina, nome: busca || undefined });
+      if (subAtual === "parceiros") {
+        data = await getStormParceiros({ pagina: paginaAtual, nome: buscaAtual || undefined });
         console.log("[Storm parceiros raw]:", JSON.stringify(data, null, 2));
-        setItems(normalize(data, ["parceiros", "corretores", "correspondentes", "items", "data"]));
+        setItems(normalize(data, ["parceiros", "corretores", "correspondentes", "promotoras", "items", "data"]));
       } else {
-        data = await getStormColaboradores({ pagina, usuario: busca || undefined });
+        data = await getStormColaboradores({ pagina: paginaAtual, usuario: buscaAtual || undefined });
         console.log("[Storm colaboradores raw]:", JSON.stringify(data, null, 2));
         setItems(normalize(data, ["colaboradores", "operadores", "usuarios", "items", "data"]));
       }
     } catch (e: AnyData) {
-      console.error(`[Storm ${sub} erro]:`, e?.response?.data ?? e);
-      setErro(e?.response?.data?.detail ?? `Erro ao buscar ${sub}`);
+      const msg = e?.response?.data?.detail ?? e?.message ?? `Erro ao buscar ${subAtual}`;
+      console.error(`[Storm ${subAtual} erro]:`, e?.response?.data ?? e);
+      setErro(msg);
       setItems([]);
     } finally { setLoading(false); }
-  }, [sub, pagina, busca]);
+  }, []);
 
+  // Auto-carrega ao montar e ao trocar de sub-aba
   useEffect(() => {
-    setItems([]); setErro(""); setPagina(1);
-  }, [sub]);
+    setBusca(""); setPagina(1);
+    executarBusca(1, "", sub);
+  }, [sub]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const verDetalhe = async (c: AnyData) => {
     const norm = normColab(c);
@@ -1013,9 +1021,9 @@ function AbaColaboradores() {
     setDetalhe(null);
     setLoadingDetalhe(true);
     try {
-      const data = sub === "parceiros"
-        ? await getStormParceiro(norm.id)
-        : await getStormColaborador(norm.id);
+      const data = norm.id != null
+        ? (sub === "parceiros" ? await getStormParceiro(norm.id) : await getStormColaborador(norm.id))
+        : c;
       console.log(`[Storm detalhe ${sub} raw]:`, JSON.stringify(data, null, 2));
       setDetalhe(data ?? c);
     } catch {
@@ -1036,8 +1044,8 @@ function AbaColaboradores() {
       <div className="p-4 rounded-xl space-y-3" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
         {/* Sub-abas */}
         <div className="flex gap-2">
-          <button style={tabBtnStyle(sub === "parceiros")} onClick={() => setSub("parceiros")}>Parceiros</button>
           <button style={tabBtnStyle(sub === "colaboradores")} onClick={() => setSub("colaboradores")}>Colaboradores</button>
+          <button style={tabBtnStyle(sub === "parceiros")} onClick={() => setSub("parceiros")}>Parceiros</button>
         </div>
 
         {/* Busca + ação */}
@@ -1045,15 +1053,23 @@ function AbaColaboradores() {
           <input
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && buscar()}
+            onKeyDown={(e) => { if (e.key === "Enter") { setPagina(1); executarBusca(1, busca, sub); } }}
             placeholder={sub === "parceiros" ? "Buscar por nome ou CPF/CNPJ..." : "Buscar por usuário ou nome..."}
             className="flex-1 min-w-44 px-3 py-2 rounded-lg text-xs"
             style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
           />
-          <button onClick={() => { setPagina(1); buscar(); }} className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>
+          <button
+            onClick={() => { setPagina(1); executarBusca(1, busca, sub); }}
+            className="px-4 py-2 rounded-lg text-xs font-bold text-white"
+            style={{ backgroundColor: "#DC2626" }}
+          >
             Buscar
           </button>
-          <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => { setPagina((p) => p + 1); }} />
+          <Paginacao
+            pagina={pagina}
+            onPrev={() => { const p = Math.max(1, pagina - 1); setPagina(p); executarBusca(p, busca, sub); }}
+            onNext={() => { const p = pagina + 1; setPagina(p); executarBusca(p, busca, sub); }}
+          />
         </div>
       </div>
 

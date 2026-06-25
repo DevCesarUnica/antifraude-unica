@@ -243,26 +243,29 @@ class StormService:
 
     def _processar_resposta(self, resp: httpx.Response, path: str) -> Any:
         if resp.status_code == 401:
-            # Token expirado ou inválido — invalida cache para forçar renovação
             _token_cache.invalidar()
             raise StormAuthError(
                 f"Storm API: token rejeitado em {path!r} — credenciais podem ter mudado"
             )
         if resp.status_code == 403:
-            # Autenticado mas sem permissão — NÃO invalida o token
             detalhe = self._extrair_detalhe(resp)
             raise StormPermissionError(
                 f"Storm API: sem permissão para {path!r}. "
                 f"Verifique se o usuário possui acesso a este endpoint na Storm. "
                 f"Detalhe: {detalhe}"
             )
+        if resp.status_code == 404:
+            raise StormAPIError(
+                f"Storm API: endpoint {path!r} não encontrado (404). "
+                f"Verifique o nome correto do recurso na documentação Storm."
+            )
         if resp.status_code == 429:
             raise StormRateLimitError("Storm API: limite de 20 req/min atingido")
-        if resp.status_code == 422:
+        if not resp.is_success:
+            detalhe = self._extrair_detalhe(resp)
             raise StormAPIError(
-                f"Storm API: requisição inválida em {path!r} — {self._extrair_detalhe(resp)}"
+                f"Storm API: HTTP {resp.status_code} em {path!r} — {detalhe}"
             )
-        resp.raise_for_status()
         return resp.json()
 
     # ── Status ────────────────────────────────────────────────────────────────

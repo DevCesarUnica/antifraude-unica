@@ -339,7 +339,7 @@ class StormService:
         return await self._chamar_com_retry_get("/historico_contrato", {"contrato_ff": ff})
 
     async def get_acompanhamento_contrato(self, ff: str) -> Any:
-        return await self._chamar_com_retry_get("/historico_contrato", {"contrato_ff": ff})
+        return await self._chamar_com_retry_get("/acompanhamento_contrato", {"contrato_ff": ff})
 
     async def get_status_contrato(self) -> Any:
         return await self._chamar_com_retry_get("/contratos_status")

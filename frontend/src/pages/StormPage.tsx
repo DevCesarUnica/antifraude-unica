@@ -79,6 +79,152 @@ function AlertOk({ msg }: { msg: string }) {
   return <p className="text-xs font-semibold px-3 py-2 rounded-lg" style={{ backgroundColor: "rgba(34,197,94,0.08)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.2)" }}>{msg}</p>;
 }
 
+// ── Componentes de Modal ──────────────────────────────────────────────────────
+
+function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(0,0,0,0.72)" }} onClick={onClose}>
+      <div className="w-full max-w-xl rounded-2xl shadow-2xl max-h-[88vh] flex flex-col"
+        style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}
+        onClick={(e) => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ModalHeader({ title, ff, onClose }: { title: string; ff: string; onClose: () => void }) {
+  return (
+    <div className="flex justify-between items-center px-5 py-4 flex-shrink-0"
+      style={{ borderBottom: "1px solid var(--border)" }}>
+      <div>
+        <h3 className="text-sm font-black" style={{ color: "var(--text-primary)" }}>{title}</h3>
+        <p className="text-[10px] font-mono mt-0.5" style={{ color: "#DC2626" }}>{ff}</p>
+      </div>
+      <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg"
+        style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)" }}>✕ Fechar</button>
+    </div>
+  );
+}
+
+// ── Histórico: layout de timeline ─────────────────────────────────────────────
+
+function fmtDataHora(s: string): string {
+  if (!s) return "";
+  try {
+    if (s.includes("T") || /^\d{4}-\d{2}-\d{2}/.test(s)) {
+      return new Date(s).toLocaleString("pt-BR", {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+    }
+    if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) return s;
+    return s;
+  } catch { return s; }
+}
+
+function HistoricoTimeline({ itens }: { itens: AnyData[] }) {
+  return (
+    <div style={{ position: "relative", paddingLeft: 28 }}>
+      <div style={{ position: "absolute", left: 7, top: 8, bottom: 8, width: 2, backgroundColor: "var(--border)" }} />
+      <div className="space-y-3">
+        {itens.map((h: AnyData, i: number) => {
+          const evento = h.descricao ?? h.acao ?? h.situacao ?? h.evento ?? h.tipo ?? h.status ?? "Evento";
+          const data   = fmtDataHora(h.data ?? h.data_criacao ?? h.dt_evento ?? h.data_hora ?? h.created_at ?? "");
+          const usuario = h.usuario ?? h.operador ?? h.nome_usuario ?? h.user ?? "";
+          const obs    = h.observacao ?? h.motivo ?? h.detalhe ?? h.comentario ?? h.mensagem ?? "";
+          return (
+            <div key={i} style={{ position: "relative" }}>
+              <div style={{
+                position: "absolute", left: -21, top: 6,
+                width: 10, height: 10, borderRadius: 5,
+                backgroundColor: i === 0 ? "#DC2626" : "var(--bg-mid)",
+                border: `2px solid ${i === 0 ? "#DC2626" : "var(--text-muted)"}`,
+              }} />
+              <div className="rounded-xl p-3" style={{ backgroundColor: "var(--bg-mid)" }}>
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-xs font-bold flex-1" style={{ color: "var(--text-primary)" }}>{String(evento)}</span>
+                  {data && <span className="text-[10px] font-mono flex-shrink-0" style={{ color: "var(--text-muted)" }}>{data}</span>}
+                </div>
+                {usuario && (
+                  <p className="text-[10px] mt-1.5" style={{ color: "var(--text-muted)" }}>
+                    Operador: <strong style={{ color: "var(--text-secondary)" }}>{String(usuario)}</strong>
+                  </p>
+                )}
+                {obs && (
+                  <p className="text-[10px] mt-1 italic" style={{ color: "var(--text-muted)" }}>{String(obs)}</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Acompanhamento: renderiza qualquer estrutura JSON ─────────────────────────
+
+function valorStr(v: unknown): string {
+  if (v == null || v === "") return "—";
+  if (typeof v === "boolean") return v ? "Sim" : "Não";
+  if (typeof v === "string" || typeof v === "number") return String(v);
+  if (Array.isArray(v)) return v.length > 0 ? `${v.length} registros` : "—";
+  const o = v as AnyData;
+  return o.nome ?? o.descricao ?? o.name ?? o.valor ?? JSON.stringify(v).slice(0, 80);
+}
+
+function AcompanhamentoView({ data }: { data: AnyData }) {
+  if (!data || typeof data !== "object") return null;
+  const entradas = Object.entries(data as object);
+  if (entradas.length === 0) return <EmptyState msg="Sem dados." />;
+  return (
+    <div className="space-y-1">
+      {entradas.map(([k, v]) => {
+        if (v == null) return null;
+        const label = k.replace(/_/g, " ");
+        if (Array.isArray(v) && v.length > 0 && typeof v[0] === "object") {
+          return (
+            <div key={k}>
+              <p className="text-[10px] font-bold uppercase tracking-wide mt-4 mb-1" style={{ color: "var(--text-muted)" }}>{label} ({v.length})</p>
+              {(v as AnyData[]).map((item: AnyData, i: number) => (
+                <div key={i} className="rounded-xl p-3 mb-2" style={{ backgroundColor: "var(--bg-mid)" }}>
+                  {Object.entries(item as object).map(([ik, iv]) => iv != null && (
+                    <div key={ik} className="flex gap-3 py-1" style={{ borderBottom: "1px solid var(--border)" }}>
+                      <span className="text-[10px] font-semibold w-32 flex-shrink-0 uppercase" style={{ color: "var(--text-muted)" }}>{ik.replace(/_/g, " ")}</span>
+                      <span className="text-xs" style={{ color: "var(--text-primary)" }}>{valorStr(iv)}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          );
+        }
+        if (typeof v === "object" && !Array.isArray(v)) {
+          return (
+            <div key={k}>
+              <p className="text-[10px] font-bold uppercase tracking-wide mt-4 mb-1" style={{ color: "var(--text-muted)" }}>{label}</p>
+              {Object.entries(v as object).map(([sk, sv]) => sv != null && (
+                <div key={sk} className="flex gap-3 py-1.5 pl-2" style={{ borderBottom: "1px solid var(--border)" }}>
+                  <span className="text-[10px] font-semibold w-36 flex-shrink-0" style={{ color: "var(--text-muted)" }}>{sk.replace(/_/g, " ")}</span>
+                  <span className="text-xs" style={{ color: "var(--text-primary)" }}>{valorStr(sv)}</span>
+                </div>
+              ))}
+            </div>
+          );
+        }
+        return (
+          <div key={k} className="flex gap-3 py-1.5" style={{ borderBottom: "1px solid var(--border)" }}>
+            <span className="text-[10px] font-semibold w-36 flex-shrink-0 uppercase" style={{ color: "var(--text-muted)" }}>{label}</span>
+            <span className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{valorStr(v)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Paginacao({ pagina, onPrev, onNext }: { pagina: number; onPrev: () => void; onNext: () => void }) {
   return (
     <div className="flex items-center gap-2">
@@ -358,7 +504,8 @@ function AbaContratos() {
     setFfHistorico(ffCode);
     try {
       const data = await getStormHistoricoContrato(ffCode);
-      setHistorico(normalize(data, ["historico", "items"]));
+      console.log("[Storm histórico raw]:", JSON.stringify(data, null, 2));
+      setHistorico(normalize(data, ["historico", "items", "data"]));
     } catch { setHistorico([]); }
   };
 
@@ -368,9 +515,12 @@ function AbaContratos() {
     setLoadingAcomp(true);
     try {
       const data = await getStormAcompanhamentoContrato(ffCode);
+      console.log("[Storm acompanhamento raw]:", JSON.stringify(data, null, 2));
       setAcompanhamento(data);
-    } catch { setAcompanhamento(null); }
-    finally { setLoadingAcomp(false); }
+    } catch (e: AnyData) {
+      console.error("[Storm acompanhamento erro]:", e?.response?.data ?? e);
+      setAcompanhamento(null);
+    } finally { setLoadingAcomp(false); }
   };
 
   return (
@@ -459,52 +609,28 @@ function AbaContratos() {
 
       {/* Modal acompanhamento */}
       {(acompanhamento !== null || loadingAcomp) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.65)" }}>
-          <div className="w-full max-w-lg rounded-2xl p-6 shadow-2xl max-h-[80vh] overflow-y-auto" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-sm font-black" style={{ color: "var(--text-primary)" }}>Acompanhamento — {ffAcomp}</h3>
-              <button onClick={() => { setAcompanhamento(null); setFfAcomp(""); }} className="text-xs px-3 py-1.5 rounded-lg" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)" }}>Fechar</button>
-            </div>
-            {loadingAcomp ? <Spinner /> : acompanhamento && Object.keys(acompanhamento).length > 0 ? (
-              <div className="space-y-1">
-                {Object.entries(acompanhamento).map(([k, v]) => (
-                  typeof v !== "object" || v === null ? (
-                    <div key={k} className="flex gap-3 py-1.5" style={{ borderBottom: "1px solid var(--border)" }}>
-                      <span className="text-[10px] font-bold uppercase w-40 flex-shrink-0" style={{ color: "var(--text-muted)" }}>{k.replace(/_/g, " ")}</span>
-                      <span className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{String(v ?? "—")}</span>
-                    </div>
-                  ) : null
-                ))}
-              </div>
-            ) : (
-              <EmptyState msg="Nenhum dado de acompanhamento disponível." />
-            )}
+        <ModalOverlay onClose={() => { if (!loadingAcomp) { setAcompanhamento(null); setFfAcomp(""); } }}>
+          <ModalHeader title="Acompanhamento" ff={ffAcomp} onClose={() => { setAcompanhamento(null); setFfAcomp(""); }} />
+          <div className="overflow-y-auto flex-1 px-5 py-4">
+            {loadingAcomp ? <Spinner /> : !acompanhamento || Object.keys(acompanhamento).length === 0
+              ? <EmptyState msg="Nenhum dado disponível. Verifique o console (F12) para detalhes." />
+              : <AcompanhamentoView data={acompanhamento} />
+            }
           </div>
-        </div>
+        </ModalOverlay>
       )}
 
       {/* Modal histórico */}
       {historico !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.65)" }}>
-          <div className="w-full max-w-lg rounded-2xl p-6 shadow-2xl max-h-[80vh] overflow-y-auto" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-sm font-black" style={{ color: "var(--text-primary)" }}>Histórico — {ffHistorico}</h3>
-              <button onClick={() => setHistorico(null)} className="text-xs px-3 py-1.5 rounded-lg" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)" }}>Fechar</button>
-            </div>
-            {historico.length === 0 ? <EmptyState msg="Sem histórico disponível." /> : (
-              <div className="space-y-2">
-                {historico.map((h: AnyData, i: number) => (
-                  <div key={i} className="p-3 rounded-xl" style={{ backgroundColor: "var(--bg-mid)" }}>
-                    <p className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>{h.descricao ?? h.status ?? h.acao ?? h.evento ?? JSON.stringify(h).slice(0, 80)}</p>
-                    {h.data && <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{h.data}</p>}
-                    {h.usuario && <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Por: {h.usuario}</p>}
-                    {h.observacao && <p className="text-[10px] italic" style={{ color: "var(--text-muted)" }}>{h.observacao}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
+        <ModalOverlay onClose={() => setHistorico(null)}>
+          <ModalHeader title="Histórico do Contrato" ff={ffHistorico} onClose={() => setHistorico(null)} />
+          <div className="overflow-y-auto flex-1 px-5 py-4">
+            {historico.length === 0
+              ? <EmptyState msg="Sem histórico disponível." />
+              : <HistoricoTimeline itens={historico} />
+            }
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

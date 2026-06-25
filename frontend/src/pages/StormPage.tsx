@@ -101,6 +101,18 @@ function formatBRL(v: number | string | undefined) {
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+function stormStr(v: unknown): string | undefined {
+  if (v == null) return undefined;
+  if (typeof v === "string") return v || undefined;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "object") {
+    const o = v as AnyData;
+    const s = o.nome ?? o.name ?? o.codigo;
+    return s ? String(s) : undefined;
+  }
+  return undefined;
+}
+
 // ── Aba Antifraude ────────────────────────────────────────────────────────────
 
 function AbaAntifraude() {
@@ -214,8 +226,8 @@ function AbaAntifraude() {
                     {[
                       ["CPF", c.cpf_cliente ?? c.cpf],
                       ["Cliente", c.cliente ?? c.cl_nome ?? c.nome_cliente],
-                      ["Banco", c.banco ?? c.ba_nome],
-                      ["Convênio", c.convenio ?? c.co_nome],
+                      ["Banco", stormStr(c.banco) ?? stormStr(c.ba_nome)],
+                      ["Convênio", stormStr(c.convenio) ?? stormStr(c.co_nome)],
                       ["Valor", formatBRL(c.valor_negociado ?? c.valor)],
                       ["Produto", c.produto ?? c.pr_nome],
                       ["Prazo", c.prazo ? `${c.prazo}x` : undefined],
@@ -420,8 +432,8 @@ function AbaContratos() {
                   <td className="px-3 py-2.5 font-mono font-bold" style={{ color: "#DC2626" }}>{c.ff ?? c.codigo ?? `#${c.ct_id ?? c.id}`}</td>
                   <td className="px-3 py-2.5 font-medium" style={{ color: "var(--text-primary)" }}>{c.cliente ?? c.cl_nome ?? "—"}</td>
                   <td className="px-3 py-2.5 font-mono" style={{ color: "var(--text-muted)" }}>{c.cpf_cliente ?? c.cpf ?? "—"}</td>
-                  <td className="px-3 py-2.5" style={{ color: "var(--text-muted)" }}>{c.banco ?? c.ba_nome ?? "—"}</td>
-                  <td className="px-3 py-2.5" style={{ color: "var(--text-muted)" }}>{c.convenio ?? c.co_nome ?? "—"}</td>
+                  <td className="px-3 py-2.5" style={{ color: "var(--text-muted)" }}>{stormStr(c.banco) ?? stormStr(c.ba_nome) ?? "—"}</td>
+                  <td className="px-3 py-2.5" style={{ color: "var(--text-muted)" }}>{stormStr(c.convenio) ?? stormStr(c.co_nome) ?? "—"}</td>
                   <td className="px-3 py-2.5 font-bold" style={{ color: "var(--text-primary)" }}>{formatBRL(c.valor_negociado ?? c.valor)}</td>
                   <td className="px-3 py-2.5">
                     {c.status ? <Badge label={String(c.status)} color="blue" /> : "—"}
@@ -770,7 +782,7 @@ function AbaClientes() {
                           {ct.produto !== "—" && <Badge label={ct.produto} color="purple" />}
                         </div>
                         <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>
-                          {[ct.banco, ct.convenio].filter((v) => v !== "—").join(" · ")}
+                          {[ct.banco, ct.convenio].map(stormStr).filter((v): v is string => !!v && v !== "—").join(" · ") || "—"}
                         </p>
                         <div className="flex flex-wrap gap-3 text-[10px]" style={{ color: "var(--text-muted)" }}>
                           {ct.prazo !== "—" && <span>{ct.prazo}</span>}

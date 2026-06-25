@@ -111,6 +111,7 @@ def listar_propostas(
     status: str | None = None,
     banco: str | None = None,
     cpf: str | None = None,
+    nome: str | None = None,
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
@@ -121,7 +122,10 @@ def listar_propostas(
     if banco:
         q = q.filter(Proposta.banco == banco)
     if cpf:
-        q = q.filter(Proposta.cpf_cliente == cpf)
+        digits = cpf.replace(".", "").replace("-", "")
+        q = q.filter(Proposta.cpf_cliente.ilike(f"%{digits}%"))
+    if nome:
+        q = q.filter(Proposta.nome_cliente.ilike(f"%{nome}%"))
     return q.order_by(Proposta.criado_em.desc()).offset(skip).limit(limit).all()
 
 

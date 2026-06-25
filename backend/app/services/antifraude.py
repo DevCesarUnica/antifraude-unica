@@ -131,17 +131,11 @@ class MotorAntifraude:
     # ── Auto-mapeamento de convênio ───────────────────────────────────────────
 
     def _auto_mapear_convenio(self, proposta: Proposta) -> None:
-        """
-        Registra automaticamente convênios desconhecidos na tabela de referência.
-        Elimina o status NAO_MAPEADA sem intervenção humana.
-        """
         if not proposta.convenio:
             return
-
         existente = self._db.query(Convenio).filter(
             Convenio.nome == proposta.convenio
         ).first()
-
         if not existente:
             novo = Convenio(
                 nome=proposta.convenio,
@@ -150,17 +144,7 @@ class MotorAntifraude:
                 auto_registrado=True,
             )
             self._db.add(novo)
-            try:
-                self._db.flush()
-                log.info(
-                    "motor.convenio_auto_registrado",
-                    convenio=proposta.convenio,
-                    banco=proposta.banco,
-                    proposta_id=proposta.id,
-                )
-            except Exception:
-                # Conflito de unicidade em race condition — já foi criado por outro processo
-                self._db.rollback()
+            self._db.flush()
 
     # ── Avaliação individual por tipo ─────────────────────────────────────────
 

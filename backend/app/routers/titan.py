@@ -6,8 +6,9 @@ Mapeamento de erros:
   TitanAPIError   → 503 Unavailable   (serviço externo indisponível)
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from app.services.titan import TitanService, TitanAPIError, TitanAuthError
+from app.schemas_titan import TitanCriarOperacaoRequest
 
 router = APIRouter(prefix="/titan", tags=["titan"])
 
@@ -78,6 +79,54 @@ async def dados_referencia(force_refresh: bool = False):
             return await titan.get_all(force_refresh)
     except TitanAPIError as exc:
         raise _http_error(exc)
+
+
+# ── Criar operação ───────────────────────────────────────────────────────────
+
+@router.post("/operacoes", status_code=201)
+async def criar_operacao(body: TitanCriarOperacaoRequest):
+    """Envia uma operação ao motor de cálculo externo Titan (Hope/Ceoslab)."""
+    try:
+        async with TitanService() as titan:
+            return await titan.create_operation(body.model_dump(exclude_none=False))
+    except TitanAPIError as exc:
+        raise _http_error(exc)
+
+
+@router.get("/operacoes/{operation_id}")
+async def consultar_operacao(operation_id: str):
+    """Consulta o estado de uma operação pelo ID retornado pelo Titan."""
+    try:
+        async with TitanService() as titan:
+            return await titan.get_operation(operation_id)
+    except TitanAPIError as exc:
+        raise _http_error(exc)
+
+
+# ── Sincronização de propostas ────────────────────────────────────────────────
+
+@router.post("/sync")
+async def sincronizar_propostas(
+    page_size: int = Query(default=50, ge=1, le=200),
+    max_pages: int = Query(default=20, ge=1, le=100),
+    data_inicio: str | None = Query(default=None, description="ISO 8601, ex: 2026-06-01T00:00:00-03:00"),
+    data_fim: str | None = Query(default=None, description="ISO 8601, ex: 2026-06-30T23:59:59-03:00"),
+    status_id: int | None = Query(default=None, description="ID do status Titan (ex: 23=Pago)"),
+):
+    """
+    Importa operações do Titan como propostas e as processa pelo motor antifraude.
+    Operações já importadas são ignoradas (idempotente).
+    Filtra por data e/ou status do Titan quando informados.
+    """
+    from app.services.titan_sync import sincronizar
+    resultado = await sincronizar(
+        page_size=page_size,
+        max_pages=max_pages,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+        status_id=status_id,
+    )
+    return resultado
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────

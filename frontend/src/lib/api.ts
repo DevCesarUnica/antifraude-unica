@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "",
+  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
 });
 
 api.interceptors.request.use((config) => {
@@ -26,8 +26,8 @@ api.interceptors.response.use(
 
 // ── Propostas ─────────────────────────────────────────────────────────────────
 
-export const getPropostas = (status?: string) =>
-  api.get("/propostas/", { params: status ? { status } : {} }).then((r) => r.data);
+export const getPropostas = (params?: { status?: string; banco?: string; cpf?: string; nome?: string }) =>
+  api.get("/propostas/", { params }).then((r) => r.data);
 
 export const getPropostaSummary = () =>
   api.get("/propostas/summary").then((r) => r.data);

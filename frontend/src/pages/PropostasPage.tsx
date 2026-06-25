@@ -19,58 +19,165 @@ const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
 
 const STATUSES = ["", "ENFILEIRADA", "EM_ANALISE", "APROVADA", "BLOQUEADA", "ANALISE_MANUAL", "ERRO"];
 
-const inputStyle = {
+const FILTROS_VAZIOS = { status: "", banco: "", cpf: "", nome: "" };
+
+const inputCls = {
   backgroundColor: "var(--bg-mid)", color: "var(--text-primary)",
   border: "1px solid var(--border)", borderRadius: "0.5rem",
   padding: "0.4rem 0.75rem", fontSize: "0.8rem", outline: "none",
 };
 
 export default function PropostasPage() {
-  const [filtro, setFiltro] = useState("");
+  const [filtros, setFiltros] = useState(FILTROS_VAZIOS);
+  const [aplicados, setAplicados] = useState(FILTROS_VAZIOS);
   const qc = useQueryClient();
 
+  const temFiltro = Object.values(aplicados).some(Boolean);
+
   const { data: propostas = [], isLoading } = useQuery({
-    queryKey: ["propostas", filtro],
-    queryFn: () => getPropostas(filtro || undefined),
+    queryKey: ["propostas", aplicados],
+    queryFn: () => getPropostas({
+      status: aplicados.status || undefined,
+      banco:  aplicados.banco  || undefined,
+      cpf:    aplicados.cpf    || undefined,
+      nome:   aplicados.nome   || undefined,
+    }),
     refetchInterval: 8_000,
   });
 
-  const mutAprovar    = useMutation({ mutationFn: aprovarProposta,    onSuccess: () => qc.invalidateQueries({ queryKey: ["propostas"] }) });
-  const mutBloquear   = useMutation({ mutationFn: bloquearProposta,   onSuccess: () => qc.invalidateQueries({ queryKey: ["propostas"] }) });
+  const mutAprovar     = useMutation({ mutationFn: aprovarProposta,     onSuccess: () => qc.invalidateQueries({ queryKey: ["propostas"] }) });
+  const mutBloquear    = useMutation({ mutationFn: bloquearProposta,    onSuccess: () => qc.invalidateQueries({ queryKey: ["propostas"] }) });
   const mutReprocessar = useMutation({ mutationFn: reprocessarProposta, onSuccess: () => qc.invalidateQueries({ queryKey: ["propostas"] }) });
+
+  const aplicarFiltros = () => setAplicados({ ...filtros });
+
+  const limparFiltros = () => {
+    setFiltros(FILTROS_VAZIOS);
+    setAplicados(FILTROS_VAZIOS);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") aplicarFiltros();
+  };
 
   return (
     <Layout>
       <div className="flex flex-col gap-4">
+
+        {/* Cabeçalho */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-black uppercase tracking-wide" style={{ color: "var(--text-primary)" }}>Propostas</h1>
-            <p className="text-xs" style={{ color: "var(--text-muted)" }}>{propostas.length} registro{propostas.length !== 1 ? "s" : ""}</p>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+              {propostas.length} registro{propostas.length !== 1 ? "s" : ""}
+              {temFiltro ? " (filtrado)" : ""}
+            </p>
           </div>
-          <select value={filtro} onChange={(e) => setFiltro(e.target.value)} style={inputStyle}>
-            {STATUSES.map((s) => <option key={s} value={s}>{s || "Todos os status"}</option>)}
-          </select>
         </div>
 
+        {/* Filtros */}
+        <div className="rounded-xl p-4" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {/* Status */}
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider mb-1 block" style={{ color: "var(--text-muted)" }}>Status</label>
+              <select
+                value={filtros.status}
+                onChange={(e) => setFiltros({ ...filtros, status: e.target.value })}
+                onKeyDown={onKeyDown}
+                style={inputCls}
+              >
+                {STATUSES.map((s) => <option key={s} value={s}>{s || "Todos"}</option>)}
+              </select>
+            </div>
+
+            {/* Banco */}
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider mb-1 block" style={{ color: "var(--text-muted)" }}>Banco</label>
+              <input
+                value={filtros.banco}
+                onChange={(e) => setFiltros({ ...filtros, banco: e.target.value })}
+                onKeyDown={onKeyDown}
+                placeholder="Ex: HOPE"
+                style={inputCls}
+              />
+            </div>
+
+            {/* Nome */}
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider mb-1 block" style={{ color: "var(--text-muted)" }}>Nome do cliente</label>
+              <input
+                value={filtros.nome}
+                onChange={(e) => setFiltros({ ...filtros, nome: e.target.value })}
+                onKeyDown={onKeyDown}
+                placeholder="Parte do nome"
+                style={inputCls}
+              />
+            </div>
+
+            {/* CPF */}
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider mb-1 block" style={{ color: "var(--text-muted)" }}>CPF</label>
+              <input
+                value={filtros.cpf}
+                onChange={(e) => setFiltros({ ...filtros, cpf: e.target.value })}
+                onKeyDown={onKeyDown}
+                placeholder="000.000.000-00"
+                style={inputCls}
+              />
+            </div>
+          </div>
+
+          {/* Ações dos filtros */}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={aplicarFiltros}
+              className="px-4 py-1.5 rounded-lg text-xs font-bold text-white transition-opacity hover:opacity-80"
+              style={{ backgroundColor: "#DC2626" }}
+            >
+              Pesquisar
+            </button>
+            {temFiltro && (
+              <button
+                onClick={limparFiltros}
+                className="px-4 py-1.5 rounded-lg text-xs font-medium transition-opacity hover:opacity-70"
+                style={{ color: "var(--text-muted)", border: "1px solid var(--border)" }}
+              >
+                Limpar filtros
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Tabela */}
         <div className="rounded-xl overflow-hidden" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm" style={{ minWidth: 800 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border)", backgroundColor: "var(--bg-subtle)" }}>
-                  {["ID Externo", "CPF", "Banco", "Valor", "Status", "Score", "Data", ""].map((h, i) => (
-                    <th key={i} className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide ${i >= 3 ? "text-right" : "text-left"}`}
+                  {["ID Externo", "Nome", "CPF", "Banco", "Valor", "Status", "Score", "Data", ""].map((h, i) => (
+                    <th key={i} className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide ${i >= 4 ? "text-right" : "text-left"}`}
                       style={{ color: "var(--text-muted)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {isLoading && <tr><td colSpan={8} className="text-center py-10 text-sm" style={{ color: "var(--text-muted)" }}>Carregando...</td></tr>}
-                {!isLoading && propostas.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-sm" style={{ color: "var(--text-muted)" }}>Nenhuma proposta encontrada</td></tr>}
+                {isLoading && (
+                  <tr><td colSpan={9} className="text-center py-10 text-sm" style={{ color: "var(--text-muted)" }}>Carregando...</td></tr>
+                )}
+                {!isLoading && propostas.length === 0 && (
+                  <tr><td colSpan={9} className="text-center py-10 text-sm" style={{ color: "var(--text-muted)" }}>
+                    {temFiltro ? "Nenhuma proposta encontrada para os filtros aplicados." : "Nenhuma proposta encontrada."}
+                  </td></tr>
+                )}
                 {propostas.map((p: any, idx: number) => {
                   const badge = STATUS_BADGE[p.status] ?? STATUS_BADGE.ENFILEIRADA;
                   return (
                     <tr key={p.id} style={{ backgroundColor: idx % 2 === 0 ? "var(--bg-row-even)" : "var(--bg-row-odd)", borderBottom: "1px solid var(--border-mid)" }}>
                       <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--text-muted)" }}>{p.proposta_id_externo}</td>
+                      <td className="px-4 py-3 text-xs font-medium" style={{ color: "var(--text-primary)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.nome_cliente || "—"}
+                      </td>
                       <td className="px-4 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>{p.cpf_cliente}</td>
                       <td className="px-4 py-3 text-xs font-medium" style={{ color: "var(--text-primary)" }}>{p.banco}</td>
                       <td className="px-4 py-3 text-right text-xs font-medium" style={{ color: "var(--text-primary)" }}>

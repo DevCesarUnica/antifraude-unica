@@ -150,9 +150,7 @@ class TitanService:
 
     BASE_URL = settings.titan_base_url
     HEADERS = {
-        # WWW-Authenticate: Bearer confirmado nos testes diretos contra a API.
-        # O header "Titan-Api-Key" retornava 403 (não reconhecido).
-        "Authorization": f"Bearer {settings.titan_api_key}",
+        "Titan-Api-Key": settings.titan_api_key,
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
@@ -341,6 +339,37 @@ class TitanService:
         )
         return data
 
+    # ── POST (sem retry — evita duplicação de operação) ──────────────────────
+
+    async def _post(self, endpoint: str, payload: dict) -> Any:
+        async def _call():
+            t0 = time.monotonic()
+            log.info("titan.post_request", endpoint=endpoint)
+            resp = await self._client.post(endpoint, json=payload)
+            latencia_ms = round((time.monotonic() - t0) * 1000, 1)
+            log.info(
+                "titan.post_response",
+                endpoint=endpoint,
+                status=resp.status_code,
+                latencia_ms=latencia_ms,
+            )
+            if resp.status_code in (401, 403):
+                raise TitanAuthError(
+                    f"Titan API: credencial inválida (HTTP {resp.status_code})"
+                )
+            resp.raise_for_status()
+            return resp.json()
+
+        try:
+            return await self._breaker.chamar_async(
+                _call, ignorar_excecoes=(TitanAuthError,)
+            )
+        except (TitanAPIError, TitanAuthError):
+            raise
+        except CircuitBreakerAberto as exc:
+            log.error("titan.circuit_breaker_open", endpoint=endpoint, error=str(exc))
+            raise TitanAPIError(f"Titan API indisponível: {exc}") from exc
+
     # ── Endpoints públicos ─────────────────────────────────────────────────────
 
     async def get_banks(self, force_refresh: bool = False) -> list[dict]:
@@ -389,6 +418,16 @@ class TitanService:
             else:
                 output[key] = result
         return output
+
+    async def create_operation(self, payload: dict) -> dict:
+        """Cria uma operação no motor de cálculo externo Titan."""
+        data = await self._post("/operations/create", payload)
+        log.info("titan.operation_created", operation_id=data.get("id"))
+        return data
+
+    async def get_operation(self, operation_id: str | int) -> dict:
+        """Consulta uma operação existente pelo ID (sem cache — dado muda de estado)."""
+        return await self._fetch(f"/operations/{operation_id}")
 
     # ── Invalidar cache ────────────────────────────────────────────────────────
 
@@ -469,7 +508,7 @@ class TitanService:
             try:
                 t0 = time.monotonic()
                 resp = await self._client.get(
-                    "/banks", timeout=httpx.Timeout(5.0)
+                    "/operations?page=1&pageSize=1", timeout=httpx.Timeout(5.0)
                 )
                 latencia_ms = round((time.monotonic() - t0) * 1000, 1)
                 resultado["conectividade"] = "ok" if resp.status_code < 400 else "degradado"

@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+_ENV_FILE = Path(__file__).parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -11,7 +15,7 @@ class Settings(BaseSettings):
     titan_base_url: str = "https://hope.titan.ceoslab.app/api"
     titan_api_key: str = "123"
     titan_cache_ttl: int = 3600
-    titan_timeout: int = 10
+    titan_timeout: int = 30
     titan_max_retries: int = 3
 
     # Segurança
@@ -37,7 +41,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     environment: str = "development"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": str(_ENV_FILE), "env_file_encoding": "utf-8"}
 
 
 settings = Settings()

@@ -957,18 +957,27 @@ function statusCorColab(s: string): "green" | "red" | "gray" {
   return "gray";
 }
 
+// ss() — extrai string segura de qualquer valor, incluindo objetos aninhados
+function ss(...vals: unknown[]): string {
+  for (const v of vals) {
+    const s = stormStr(v);
+    if (s) return s;
+  }
+  return "";
+}
+
 function normColab(c: AnyData) {
   return {
     id:       c.id       ?? c.op_id  ?? c.pa_id  ?? c.par_id  ?? null,
-    nome:     c.nome     ?? c.op_nome ?? c.pa_nome ?? c.par_nome ?? c.usuario ?? c.login ?? "—",
-    login:    c.usuario  ?? c.login  ?? c.op_usuario ?? "",
-    email:    c.email    ?? c.op_email ?? c.pa_email ?? "",
-    telefone: c.telefone ?? c.celular ?? c.pa_telefone ?? c.fone ?? "",
-    cpf_cnpj: c.cpf      ?? c.cnpj   ?? c.cpf_cnpj   ?? c.pa_cpf ?? "",
-    status:   String(c.status ?? c.status_usuario ?? c.situacao ?? c.ativo ?? ""),
-    tipo:     c.tipo     ?? c.perfil  ?? c.privilegio  ?? c.categoria ?? c.pa_tipo ?? "",
-    cidade:   c.cidade   ?? c.pa_cidade ?? c.municipio ?? "",
-    uf:       c.uf       ?? c.estado  ?? c.pa_uf ?? "",
+    nome:     ss(c.nome, c.op_nome, c.pa_nome, c.par_nome, c.usuario, c.login) || "—",
+    login:    ss(c.usuario, c.login, c.op_usuario),
+    email:    ss(c.email, c.op_email, c.pa_email),
+    telefone: ss(c.telefone, c.celular, c.pa_telefone, c.fone),
+    cpf_cnpj: ss(c.cpf, c.cnpj, c.cpf_cnpj, c.pa_cpf),
+    status:   ss(c.status, c.status_usuario, c.situacao, c.ativo),
+    tipo:     ss(c.tipo, c.perfil, c.privilegio, c.categoria, c.pa_tipo),
+    cidade:   ss(c.cidade, c.pa_cidade, c.municipio),
+    uf:       ss(c.uf, c.estado, c.pa_uf),
   };
 }
 
@@ -1009,11 +1018,10 @@ function AbaColaboradores() {
     } finally { setLoading(false); }
   }, []);
 
-  // Auto-carrega ao montar e ao trocar de sub-aba
+  // Reset ao trocar sub-aba, sem auto-carregar
   useEffect(() => {
-    setBusca(""); setPagina(1);
-    executarBusca(1, "", sub);
-  }, [sub]); // eslint-disable-line react-hooks/exhaustive-deps
+    setBusca(""); setPagina(1); setItems([]); setErro("");
+  }, [sub]);
 
   const verDetalhe = async (c: AnyData) => {
     const norm = normColab(c);

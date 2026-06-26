@@ -74,6 +74,37 @@ class PropostaSummary(BaseModel):
     erro: int
 
 
+class PropostaDashboardItem(BaseModel):
+    id: str
+    ade: str
+    banco: str
+    convenio: str | None
+    produto: str | None
+    corretor: str | None
+    corretor_id: str | None
+    valor: float
+    status: str
+    cpf: str
+    nome_cliente: str | None
+    uf_cliente: str | None
+    observacoes: str | None
+    data_importacao: datetime
+    data_atualizacao: datetime
+    data_agendamento: str | None
+    possui_arquivos: bool
+    score_fraude: int | None
+    resultado_motor: str | None
+    origem: str
+    tentativas: int
+
+
+class PropostasDashboardResponse(BaseModel):
+    items: list[PropostaDashboardItem]
+    total: int
+    skip: int
+    limit: int
+
+
 # ── Regra Antifraude ─────────────────────────────────────────────────────────
 
 class RegraCreate(BaseModel):

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getPropostaSummary } from "@/lib/api";
 import Layout from "@/components/Layout";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import DashboardPropostasTable from "@/components/DashboardPropostasTable";
 
 const CARD_COLORS = {
   analisar:       "#60a5fa",
@@ -81,6 +82,12 @@ export default function DashboardPage() {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+            </div>
+            <div>
+              <h2 className="text-sm font-black uppercase tracking-wide mb-3" style={{ color: "var(--text-primary)" }}>
+                Mesa de Crédito
+              </h2>
+              <DashboardPropostasTable />
             </div>
           </>
         )}

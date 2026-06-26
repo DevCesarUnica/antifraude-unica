@@ -50,6 +50,22 @@ export const bloquearProposta = (id: string) =>
 export const reprocessarProposta = (id: string) =>
   api.post(`/propostas/${id}/reprocessar`).then((r) => r.data);
 
+export const getPropostasDashboard = (params?: {
+  banco?: string;
+  status?: string;
+  cpf?: string;
+  nome?: string;
+  corretor?: string;
+  valor_min?: number;
+  valor_max?: number;
+  data_inicio?: string;
+  data_fim?: string;
+  order_by?: string;
+  order_dir?: "asc" | "desc";
+  skip?: number;
+  limit?: number;
+}) => api.get("/propostas/dashboard", { params }).then((r) => r.data);
+
 // ── Regras ────────────────────────────────────────────────────────────────────
 
 export const getRegras = (ativo?: boolean) =>

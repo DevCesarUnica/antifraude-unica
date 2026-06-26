@@ -2,8 +2,8 @@
   SISTEMA ANTIFRAUDE - UNICA PROMOTORA
   HIERARQUIA DE USUÁRIOS E PERMISSÕES
 ================================================================================
-  Última atualização: 15/06/2026
-  Versão do sistema : MVP 1.2
+  Última atualização: 26/06/2026
+  Versão do sistema : 2.3
 ================================================================================
 
 
@@ -158,19 +158,20 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
 ================================================================================
 
   BACKEND (API — proteção real):
-    - GET  /users/              → exige role ADMIN ou GESTOR
-    - POST /users/              → exige role ADMIN
-    - PUT  /users/{id}          → exige role ADMIN
-    - PATCH /users/{id}/status  → exige role ADMIN
-    - PUT  /propostas/{id}/status → bloqueia OPERADOR se status for
-                                    APROVADA ou REPROVADA (HTTP 403)
+    - GET  /usuarios/              → exige role ADMIN ou GESTOR
+    - POST /usuarios/              → exige role ADMIN
+    - PATCH /usuarios/{id}         → exige role ADMIN
+    - DELETE /usuarios/{id}        → exige role ADMIN (desativa)
+    - DELETE /usuarios/{id}/excluir → exige role ADMIN (remove permanente)
+    - POST /propostas/{id}/aprovar  → disponível para ADMIN, GESTOR, ANALISTA
+    - POST /propostas/{id}/bloquear → disponível para ADMIN, GESTOR, ANALISTA
 
   FRONTEND (interface — proteção visual):
-    - Menu "Gestão de Usuários" visível apenas para ADMIN e GESTOR
+    - Menu "Usuários" visível apenas para ADMIN e GESTOR
     - Botão "+ Novo Usuário" visível apenas para ADMIN
     - Botões de editar e ativar/desativar visíveis apenas para ADMIN
-    - OPERADOR não vê o botão de Aprovar/Reprovar nas propostas
-      (a ser implementado conforme o sistema evoluir)
+    - Modal da Mesa de Crédito (DashboardPropostasTable): botões Aprovar/Bloquear
+      aparecem conforme o status da proposta (não por perfil — protegido no backend)
 
   NOTA: A proteção real do sistema está sempre no backend. A proteção
   visual do frontend é apenas para melhorar a experiência do usuário.

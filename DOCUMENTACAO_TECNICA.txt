@@ -2,8 +2,8 @@
   SISTEMA ANTIFRAUDE - UNICA PROMOTORA
   DOCUMENTAÇÃO TÉCNICA COMPLETA
 ================================================================================
-  Última atualização: 24/06/2026 (v2.2)
-  Versão do sistema : 2.0.0
+  Última atualização: 26/06/2026 (v2.3)
+  Versão do sistema : 2.1.0
   Repositório       : https://github.com/DevCesarUnica/antifraude-unica
 ================================================================================
 
@@ -40,12 +40,13 @@
      5.4  components/Layout.tsx    — Wrapper de layout padrão
      5.5  lib/api.ts               — Camada de comunicação com o backend
      5.6  pages/LoginPage.tsx      — Tela de login
-     5.7  pages/DashboardPage.tsx  — Painel principal com KPIs
-     5.8  pages/PropostasPage.tsx  — Gestão de propostas
-     5.9  pages/RegrasPage.tsx     — Gestão de regras antifraude
-     5.10 pages/BancosPage.tsx     — Integrações com bancos
-     5.11 pages/UsuariosPage.tsx   — Gestão de usuários (admin/gestor)
-     5.12 pages/StormPage.tsx      — Integração Storm Tecnologia
+     5.7  pages/DashboardPage.tsx            — Painel principal com KPIs e Mesa de Crédito
+     5.8  pages/PropostasPage.tsx            — Gestão de propostas
+     5.9  pages/RegrasPage.tsx               — Gestão de regras antifraude
+     5.10 pages/BancosPage.tsx               — Integrações com bancos
+     5.11 pages/UsuariosPage.tsx             — Gestão de usuários (admin/gestor)
+     5.12 pages/StormPage.tsx                — Integração Storm Tecnologia
+     5.13 components/DashboardPropostasTable.tsx — Tabela operacional da Mesa de Crédito
   6. BANCO DE DADOS — TABELAS E RELACIONAMENTOS
   7. FLUXO DE AUTENTICAÇÃO
   8. ENGINE DE REGRAS ANTIFRAUDE — FLUXO COMPLETO
@@ -129,8 +130,9 @@ antifraude/
 │       ├── lib/
 │       │   └── api.ts             <- Configuração do axios e funções de API
 │       ├── components/
-│       │   ├── Header.tsx         <- Cabeçalho com navegação e menu do usuário
-│       │   └── Layout.tsx         <- Wrapper de layout (header + conteúdo)
+│       │   ├── Header.tsx                  <- Cabeçalho com navegação e menu do usuário
+│       │   ├── Layout.tsx                  <- Wrapper de layout (header + conteúdo)
+│       │   └── DashboardPropostasTable.tsx <- Tabela operacional da Mesa de Crédito
 │       └── pages/
 │           ├── LoginPage.tsx      <- Tela de login
 │           ├── DashboardPage.tsx  <- Painel principal com KPIs
@@ -270,8 +272,21 @@ SCHEMA DE AUTENTICAÇÃO:
   UserResponse  : { id, username, nome, cargo, email, role, ativo }
 
 SCHEMA DE SUMMARY:
-  StatusCount : { status: str, quantidade: int, valor_total: float }
+  PropostaSummary : { total, enfileiradas, em_analise, aprovadas, reprovadas,
+                      bloqueadas, analise_manual, enviadas_banco, confirmadas_banco, erro }
     -> Alimenta os cards KPI do Dashboard.
+
+SCHEMA DE DASHBOARD (Mesa de Crédito):
+  PropostaDashboardItem : { id, ade, banco, convenio, produto, corretor,
+                            corretor_id, valor, status, cpf, nome_cliente,
+                            uf_cliente, observacoes, data_importacao,
+                            data_atualizacao, data_agendamento, possui_arquivos,
+                            score_fraude, resultado_motor, origem, tentativas }
+    -> "ade" = proposta_id_externo (código do banco/hub).
+    -> "origem" = "hope" | "storm" | "manual" (detectado pelo prefixo do ADE).
+    -> "observacoes" = ultimo_erro OU motivo_principal OU payload.observacoes.
+
+  PropostasDashboardResponse : { items: list[PropostaDashboardItem], total, skip, limit }
 
 
 --------------------------------------------------------------------------------
@@ -398,7 +413,27 @@ ENDPOINT: GET /auth/me
 --------------------------------------------------------------------------------
 
 ENDPOINT: GET /propostas/summary
-  Retorna contagem e soma de valores agrupados por status (alimenta cards KPI).
+  Retorna contagem por status (alimenta cards KPI do Dashboard).
+
+ENDPOINT: GET /propostas/dashboard
+  Painel operacional da Mesa de Crédito. Retorna lista paginada e filtrada.
+  ATENÇÃO: declarado ANTES de /{proposta_id} no router para evitar captura.
+
+  Filtros (query params opcionais):
+    banco, status, cpf, nome, corretor  — texto parcial (ilike)
+    valor_min, valor_max                — faixa de valor float
+    data_inicio, data_fim               — faixa de criado_em (datetime ISO)
+
+  Ordenação: order_by (criado_em | atualizado_em | valor | status | banco |
+             nome_cliente), order_dir (asc | desc). Padrão: criado_em desc.
+
+  Paginação: skip (offset), limit (máx 200). Retorna total para o frontend.
+
+  Funções auxiliares (privadas):
+    _determinar_origem(proposta_id_externo) → "hope" | "storm" | "manual"
+      Detecta pelo prefixo: "titan-*" → hope, "storm-*" → storm, else manual.
+    _normalizar_proposta(p: Proposta) → dict
+      Monta PropostaDashboardItem sem hardcoding de banco.
 
 ENDPOINT: GET /propostas/?status=ANALISAR
   Lista propostas com filtro opcional por status.
@@ -810,6 +845,9 @@ FUNÇÕES EXPORTADAS:
     aprovarProposta(id)                → POST /propostas/{id}/aprovar
     bloquearProposta(id)               → POST /propostas/{id}/bloquear
     reprocessarProposta(id)            → POST /propostas/{id}/reprocessar
+    getPropostasDashboard(params?)     → GET  /propostas/dashboard
+      params: banco?, status?, cpf?, nome?, corretor?, valor_min?, valor_max?,
+              data_inicio?, data_fim?, order_by?, order_dir?, skip?, limit?
 
   Regras:
     getRegras(ativo?)                  → GET    /regras/
@@ -880,12 +918,18 @@ FLUXO:
 
 
 --------------------------------------------------------------------------------
-  5.7  frontend/src/pages/DashboardPage.tsx — Painel principal
+  5.7  frontend/src/pages/DashboardPage.tsx — Painel principal + Mesa de Crédito
 --------------------------------------------------------------------------------
 
-FUNÇÃO: KPIs gerais do sistema com cards por categoria de negócio.
-Cards atuais: Analisar, Aprovadas, Pendentes, Reprovadas (configurável).
-Exibe também estatísticas rápidas: total de propostas, valor total, taxa de aprovação.
+FUNÇÃO: Painel operacional completo com duas seções:
+
+  1. KPI Cards (topo): Analisar, Aprovadas, Não Mapeadas, Reprovadas.
+     Atualização automática a cada 10 segundos via react-query refetchInterval.
+
+  2. Gráfico de barras (Recharts): propostas por categoria.
+
+  3. Mesa de Crédito (abaixo do gráfico): renderiza <DashboardPropostasTable />
+     com tabela completa de todas as propostas.
 
 
 --------------------------------------------------------------------------------
@@ -942,11 +986,32 @@ CABEÇALHO DA PÁGINA:
   - Botão "Resetar Circuit Breaker" (visível apenas quando estado = OPEN).
   - Aviso amarelo com instruções se credenciais não estiverem configuradas.
 
+ARQUITETURA STORM/HOPE (CRÍTICA):
+  Storm é um HUB que roteia contratos de múltiplos bancos (BMG, Prefeituras, etc.).
+  Hope é um banco específico com API própria (Titan).
+  NUNCA hardcodar banco="HOPE" no fluxo Storm.
+
+  Funções de normalização (em StormPage.tsx):
+    getBancoProposta(raw, origem):
+      origem="hope"  → retorna "HOPE" fixo (correto, é o banco específico).
+      origem="storm" → extrai dinamicamente: raw.banco.nome → raw.banco_nome
+                       → raw.nm_banco → raw.convenio.banco → "Não informado".
+    normStormAntifraudeOp(op) → chama getBancoProposta(op, "storm").
+
+  Esteias válidas da Storm (enum — qualquer outro valor retorna HTTP 422):
+    "Analisar/Reanalisar"
+    "Pendentes"
+    "Aprovado aguardando liberação no banco"
+    "Migrados com informações incompletas"
+  Padrão usado: "Analisar/Reanalisar".
+
 ABAS:
 
   ANTIFRAUDE:
-    - Campo de fila (esteira) e paginação.
-    - Cards de contratos da fila com botões: Aprovar, Recusar, Pendenciar, Reanalisar.
+    - Dropdown de esteira (4 valores válidos do enum Storm).
+    - Paginação.
+    - Cards de contratos com banco extraído dinamicamente do payload Storm.
+    - Botões: Aprovar, Recusar, Pendenciar, Reanalisar.
     - Modal de ação:
         Aprovar    → confirmação simples.
         Recusar    → select de tipo de recusa + observação opcional.
@@ -965,6 +1030,44 @@ ABAS:
     - Toggle CLT / FGTS.
     - Formulário: CPF, banco (select carregado da Storm), valor e matrícula (CLT).
     - Resultado exibido como JSON formatado.
+
+
+--------------------------------------------------------------------------------
+  5.13 frontend/src/components/DashboardPropostasTable.tsx — Mesa de Crédito
+--------------------------------------------------------------------------------
+
+FUNÇÃO: Tabela operacional completa para a Mesa de Crédito. Consumida pelo
+DashboardPage.tsx, logo abaixo do gráfico de barras.
+
+FILTROS (aplicados via "Pesquisar", servidor faz a query):
+  banco, status (dropdown), cpf, nome, corretor, valor mín/máx, data início/fim.
+
+TABELA (15 colunas, scroll horizontal):
+  Proposta (ADE + chip origem), Arq., Banco, Convênio, Produto, Corretor,
+  Valor (BRL), Situação (badge), CPF (formatado), Cliente, Obs., Importação,
+  Atualização, Agendamento, Ações (botão Opções).
+
+BADGES:
+  APROVADA/CONFIRMADA_BANCO → verde | ANALISE_MANUAL → amarelo |
+  BLOQUEADA/REPROVADA → vermelho | EM_ANALISE → azul |
+  ENFILEIRADA → cinza | ERRO → laranja | ENVIADA_BANCO → roxo.
+
+CHIPS DE ORIGEM:
+  HOPE → vermelho | STORM → azul | MANUAL → cinza.
+
+ORDENAÇÃO: clique no cabeçalho ordena por aquela coluna (asc/desc).
+PAGINAÇÃO: server-side com skip/limit = 50 por página.
+
+MODAL (botão Opções):
+  - Dados completos da proposta (banco, convênio, produto, valor, corretor, UF).
+  - Datas (importação, atualização, agendamento).
+  - Observações / motivo.
+  - Histórico de auditoria (GET /propostas/{id}/auditoria) em ordem reversa.
+  - Ações com confirmação:
+      Aprovar    → POST /propostas/{id}/aprovar  (se status=ANALISE_MANUAL)
+      Bloquear   → POST /propostas/{id}/bloquear  (se ANALISE_MANUAL/APROVADA/EM_ANALISE)
+      Reprocessar→ POST /propostas/{id}/reprocessar (se ERRO/BLOQUEADA)
+  Clicar na linha NÃO abre o modal — somente o botão Opções.
 
 
 ================================================================================
@@ -1173,7 +1276,8 @@ DOCUMENTAÇÃO INTERATIVA DA API:
   GET    /auth/me                   Dados do usuário logado (requer token)
 
   PROPOSTAS (requerem token):
-  GET    /propostas/summary         Contagem e valor total por status
+  GET    /propostas/summary         Contagem por status (cards KPI)
+  GET    /propostas/dashboard       Painel operacional com filtros, sort e paginação
   GET    /propostas/                Lista propostas (query: ?status=ANALISAR)
   GET    /propostas/{id}            Detalhe de uma proposta
   GET    /propostas/{id}/debug      Raio-x da decisão antifraude (score, regras, auditoria)
@@ -1311,7 +1415,7 @@ DOCUMENTAÇÃO INTERATIVA DA API:
         → marca como ERRO propostas EM_ANALISE travadas há > 10 min
     - Celery Beat configurado com schedule da varredura
 
-  v2.2 — Titan aprimorado + proxy Vite (24/06/2026)
+  v2.2 — Titan aprimorado + proxy Vite + Storm/Hope fix (24/06/2026)
     BACKEND:
     - Autenticação Titan corrigida: header "Authorization: Bearer" (Titan-Api-Key
       retornava 403 — descartado após testes diretos contra a API).
@@ -1331,6 +1435,36 @@ DOCUMENTAÇÃO INTERATIVA DA API:
       Elimina CORS em dev; baseURL do axios agora é "" (vazio).
     - api.ts: novas funções getTitanProdutosBanco, getTitanReferenciaBanco,
       getTitanReferencia; getTitanBancos e invalidarCacheTitan com parâmetros.
+    - StormPage.tsx: separação arquitetural Storm/Hope:
+        Removido hardcode banco="HOPE" do fluxo Storm.
+        Adicionado getBancoProposta(raw, origem) — extrai banco real do payload.
+        Adicionado normStormAntifraudeOp(op) usando origem="storm".
+        AbaAntifraude agora usa getStormAntifraude com dropdown de esteira válida.
+        ESTEIAS_STORM: 4 valores aceitos pelo enum da Storm (HTTP 422 em outros).
+
+  v2.3 — Mesa de Crédito operacional (26/06/2026)
+    BACKEND:
+    - Novo endpoint GET /propostas/dashboard (declarado antes de /{proposta_id}).
+    - _determinar_origem(proposta_id_externo): "titan-*" → hope, "storm-*" → storm.
+    - _normalizar_proposta(p): monta PropostaDashboardItem sem hardcoding de banco.
+    - _SORT_COLS: mapa de colunas ordenáveis (criado_em, valor, status, banco, etc.).
+    - Filtros server-side: ilike para banco/nome/cpf/corretor, faixa de valor e data.
+    - joinedload(Proposta.corretor) para evitar N+1 queries.
+    - Novos schemas: PropostaDashboardItem, PropostasDashboardResponse.
+
+    FRONTEND:
+    - Novo componente DashboardPropostasTable.tsx:
+        Tabela com 15 colunas e scroll horizontal.
+        Filtros com "Pesquisar" / "Limpar".
+        Ordenação por coluna (clique no cabeçalho).
+        Paginação server-side (50 por página).
+        Badge de status colorido por categoria.
+        Chip de origem (HOPE/STORM/MANUAL).
+        Modal de detalhes abre SOMENTE pelo botão "Opções" (clicar na linha não faz nada).
+        Modal exibe: dados completos, datas, observações, histórico de auditoria.
+        Ações no modal: Aprovar / Bloquear / Reprocessar com confirmação.
+    - DashboardPage.tsx: renderiza <DashboardPropostasTable /> abaixo do gráfico.
+    - api.ts: adicionado getPropostasDashboard(params?).
 
 ================================================================================
   FIM DA DOCUMENTAÇÃO

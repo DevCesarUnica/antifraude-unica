@@ -65,6 +65,7 @@ ESTILIZAÇÃO
 COMPONENTES E GRÁFICOS
   - Recharts 2.12             Gráficos e dashboards baseados em SVG
   - Lucide React 0.400        Biblioteca de ícones SVG
+  - TanStack React Query 5.x  Cache e sincronização de dados do servidor
 
 HTTP E UTILITÁRIOS
   - Axios 1.7                 Cliente HTTP para consumo da API REST
@@ -110,6 +111,7 @@ ARQUITETURA
   - RPA                              Playwright para automação bancária
 
 ================================================================================
-Gerado em: 2026-06-18
+Gerado em: 2026-06-26
+Versão: 2.3
 Projeto: Sistema Antifraude - Unica Promotora
 ================================================================================

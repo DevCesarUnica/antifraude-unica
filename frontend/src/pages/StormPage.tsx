@@ -311,11 +311,19 @@ function normStormAntifraudeOp(op: AnyData) {
   };
 }
 
+const ESTEIAS_STORM = [
+  "Analisar/Reanalisar",
+  "Pendentes",
+  "Aprovado aguardando liberação no banco",
+  "Migrados com informações incompletas",
+] as const;
+
 function AbaAntifraude() {
   const [contratos, setContratos] = useState<AnyData[]>([]);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({ total: 0, aprovados: 0, recusados: 0, outros: 0 });
   const [pagina, setPagina] = useState(1);
+  const [esteira, setEsteira] = useState<string>(ESTEIAS_STORM[0]);
   const [erro, setErro] = useState("");
   const [tiposRecusas, setTiposRecusas] = useState<AnyData[]>([]);
   const [tiposPendencias, setTiposPendencias] = useState<AnyData[]>([]);
@@ -336,7 +344,7 @@ function AbaAntifraude() {
   const buscar = useCallback(async () => {
     setLoading(true); setErro("");
     try {
-      const data = await getStormAntifraude("antifraude", pagina);
+      const data = await getStormAntifraude(esteira, pagina);
       console.log("[Storm antifraude raw] primeiro item:", JSON.stringify(normalize(data, ["contratos", "items", "data", "content"])[0], null, 2));
       const items: AnyData[] = normalize(data, ["contratos", "items", "data", "content"]);
       const lista = items.map(normStormAntifraudeOp);
@@ -347,7 +355,7 @@ function AbaAntifraude() {
     } catch (e: AnyData) {
       setErro(e?.response?.data?.detail ?? "Erro ao buscar contratos antifraude Storm");
     } finally { setLoading(false); }
-  }, [pagina]);
+  }, [pagina, esteira]);
 
   useEffect(() => { buscar(); }, [buscar]);
 
@@ -379,9 +387,19 @@ function AbaAntifraude() {
     <div className="space-y-4">
       {/* Filtros / paginação */}
       <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
-        <button onClick={() => { setPagina(1); buscar(); }} className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Atualizar</button>
-        <span className="text-xs" style={{ color: "var(--text-muted)" }}>Fila: <strong>antifraude</strong> — Storm</span>
-        <div className="ml-auto">
+        <div>
+          <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Fila (Esteira)</label>
+          <select
+            value={esteira}
+            onChange={(e) => { setEsteira(e.target.value); setPagina(1); }}
+            className="px-3 py-2 rounded-lg text-xs"
+            style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)", minWidth: 220 }}
+          >
+            {ESTEIAS_STORM.map((e) => <option key={e} value={e}>{e}</option>)}
+          </select>
+        </div>
+        <button onClick={() => { setPagina(1); buscar(); }} className="px-4 py-2 rounded-lg text-xs font-bold text-white self-end" style={{ backgroundColor: "#DC2626" }}>Buscar</button>
+        <div className="ml-auto self-end">
           <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => setPagina((p) => p + 1)} />
         </div>
       </div>

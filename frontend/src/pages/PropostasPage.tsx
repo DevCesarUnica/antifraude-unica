@@ -131,7 +131,7 @@ export default function PropostasPage() {
             </div>
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider mb-1 block" style={{ color: "var(--text-muted)" }}>Banco</label>
-              <input value={filtros.banco} onChange={(e) => setFiltros({ ...filtros, banco: e.target.value })} onKeyDown={onKeyDown} placeholder="Ex: HOPE" style={inputCls} />
+              <input value={filtros.banco} onChange={(e) => setFiltros({ ...filtros, banco: e.target.value })} onKeyDown={onKeyDown} placeholder="Ex: BMG, HOPE, Pan..." style={inputCls} />
             </div>
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider mb-1 block" style={{ color: "var(--text-muted)" }}>Nome do cliente</label>

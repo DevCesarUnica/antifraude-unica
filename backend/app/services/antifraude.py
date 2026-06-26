@@ -102,16 +102,18 @@ class MotorAntifraude:
 
                 score_acumulado = min(score_acumulado + resultado.score_contribuicao, 100)
 
-        # Decisão por score acumulado
+        # Decisão por score acumulado.
+        # O motor NUNCA aprova automaticamente — a aprovação final é sempre humana.
+        # Regras só podem BLOQUEAR (fraude óbvia). Tudo mais vai para análise manual.
         if score_acumulado >= self.SCORE_BLOQUEIO:
             resultado_final = ResultadoMotor.BLOQUEADO
             motivo = f"Score de risco {score_acumulado}/100 acima do limiar de bloqueio"
-        elif score_acumulado >= self.SCORE_MANUAL:
-            resultado_final = ResultadoMotor.MANUAL
-            motivo = f"Score de risco {score_acumulado}/100 requer análise manual"
         else:
-            resultado_final = ResultadoMotor.APROVADO
-            motivo = f"Proposta aprovada automaticamente (score {score_acumulado}/100)"
+            resultado_final = ResultadoMotor.MANUAL
+            if score_acumulado >= self.SCORE_MANUAL:
+                motivo = f"Score de risco {score_acumulado}/100 requer análise manual"
+            else:
+                motivo = f"Aguardando revisão da mesa de crédito (score {score_acumulado}/100)"
 
         log.info(
             "motor.decisao",

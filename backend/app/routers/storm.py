@@ -29,7 +29,7 @@ def _handle_error(exc: Exception):
 
 @router.post("/sync")
 async def sincronizar_propostas(
-    max_paginas: int = Query(default=20, ge=1, le=100),
+    max_paginas: int = Query(default=50, ge=1, le=500),
     id_banco: int | None = Query(default=None, description="Filtrar por ID do banco Storm"),
     id_status: int | None = Query(default=None, description="Filtrar por ID de status do contrato"),
     data_inicio: str | None = Query(default=None, description="Ex: 2026-06-01"),

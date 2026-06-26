@@ -124,7 +124,7 @@ async def consultar_operacao(operation_id: str):
 @router.post("/sync")
 async def sincronizar_propostas(
     page_size: int = Query(default=50, ge=1, le=200),
-    max_pages: int = Query(default=20, ge=1, le=100),
+    max_pages: int = Query(default=50, ge=1, le=500),
     data_inicio: str | None = Query(default=None, description="ISO 8601, ex: 2026-06-01T00:00:00-03:00"),
     data_fim: str | None = Query(default=None, description="ISO 8601, ex: 2026-06-30T23:59:59-03:00"),
     status_id: int | None = Query(default=None, description="ID do status Titan (ex: 23=Pago)"),

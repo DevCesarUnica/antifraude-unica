@@ -338,6 +338,43 @@ def reprocessar(
     return Mensagem(mensagem="Proposta reenfileirada para reprocessamento")
 
 
+# ── Migração / reprocessamento em lote ───────────────────────────────────────
+
+@router.post("/reprocessar-aprovadas", response_model=Mensagem)
+def reprocessar_aprovadas(
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
+    """
+    Reenfileira todas as propostas APROVADA para reavaliação pelo motor.
+    Útil após mudança de regras ou comportamento do motor.
+    Requer perfil ADMIN ou GESTOR.
+    """
+    if usuario.perfil not in ("admin", "gestor"):
+        raise HTTPException(status_code=403, detail="Requer perfil admin ou gestor")
+
+    propostas = db.query(Proposta).filter(
+        Proposta.status == StatusProposta.APROVADA
+    ).all()
+
+    total = len(propostas)
+    for p in propostas:
+        p.status = StatusProposta.ENFILEIRADA
+        p.ultimo_erro = None
+        AuditoriaService(db).registrar(
+            p.id, TipoEvento.REPROCESSAMENTO,
+            dados={"motivo": "reprocessamento_em_lote", "usuario": usuario.username},
+        )
+
+    db.commit()
+
+    for p in propostas:
+        processar_proposta.apply_async(args=[p.id], queue="propostas")
+
+    return Mensagem(mensagem=f"{total} proposta(s) reenfileiradas para reavaliação")
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _get_ou_404(db: Session, proposta_id: str) -> Proposta:

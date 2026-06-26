@@ -4,13 +4,6 @@ import { mergeClienteAndContratos, normalizeContratoLista, stormErro, type Clien
 import {
   getStormStatus,
   resetarCircuitBreakerStorm,
-  getStormAntifraude,
-  getStormTiposRecusas,
-  getStormTiposPendencias,
-  aprovarContratoStorm,
-  recusarContratoStorm,
-  pendenciarContratoStorm,
-  reanalisarContratoStorm,
   getStormContratos,
   getStormHistoricoContrato,
   getStormAcompanhamentoContrato,
@@ -25,6 +18,7 @@ import {
   getStormOrgaos,
   simularCLTStorm,
   simularFGTSStorm,
+  getHopeOperacoes,
 } from "../lib/api";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -263,95 +257,89 @@ function stormStr(v: unknown): string | undefined {
 
 // ── Aba Antifraude ────────────────────────────────────────────────────────────
 
-function AbaAntifraude() {
-  const [contratos, setContratos] = useState<AnyData[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [stats, setStats] = useState({ pendentes: 0, aprovados: 0, recusados: 0, em_analise: 0 });
-  const ESTEIRAS = [
-    "Analisar/Reanalisar",
-    "Pendentes",
-    "Aprovado aguardando liberação no banco",
-    "Migrados com informações incompletas",
-  ];
-  const [esteira, setEsteira] = useState("Analisar/Reanalisar");
-  const [pagina, setPagina] = useState(1);
-  const [tiposRecusas, setTiposRecusas] = useState<AnyData[]>([]);
-  const [tiposPendencias, setTiposPendencias] = useState<AnyData[]>([]);
-  const [acao, setAcao] = useState<{ tipo: string; contratoId: number } | null>(null);
-  const [form, setForm] = useState({ tipo_id: "", observacao: "" });
-  const [msg, setMsg] = useState("");
-  const [erro, setErro] = useState("");
+function normHopeOp(op: AnyData) {
+  const person  = op?.customer?.person ?? {};
+  const product = op?.product ?? {};
+  const orig    = op?.originatingCompany ?? {};
+  const status  = op?.operationStatus ?? {};
+  return {
+    id:           op.id,
+    nome_cliente: String(person.fullName ?? "—"),
+    cpf_cliente:  String(person.documentNumber ?? "—"),
+    banco:        "HOPE",
+    convenio:     String(orig.tradeName ?? product.name ?? "—"),
+    produto:      String(product.name ?? "—"),
+    valor:        op.requestedValue ?? 0,
+    status:       String(status.name ?? op.operationStatusName ?? "—"),
+    data:         op.createdAt ?? op.updatedAt,
+  };
+}
 
-  const BANCO_ATIVO = "HOPE";
+function isoDatetime(date: string, endOfDay = false): string {
+  return `${date}T${endOfDay ? "23:59:59" : "00:00:00"}-03:00`;
+}
+
+function AbaAntifraude() {
+  const [ops, setOps] = useState<AnyData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [stats, setStats] = useState({ total: 0, aprovados: 0, recusados: 0, outros: 0 });
+  const [pagina, setPagina] = useState(1);
+  const [totalPaginas, setTotalPaginas] = useState(1);
+  const [dataInicio, setDataInicio] = useState("");
+  const [dataFim, setDataFim] = useState("");
+  const [erro, setErro] = useState("");
 
   const buscar = useCallback(async () => {
     setLoading(true); setErro("");
     try {
-      const data = await getStormAntifraude(esteira, pagina);
-      const todos = normalize(data, ["contratos", "items", "data"]);
-      // Exibe apenas contratos do banco configurado (HOPE)
-      const lista = todos.filter((c: AnyData) => {
-        const nomeBanco = (stormStr(c.banco) ?? stormStr(c.ba_nome) ?? "").toUpperCase();
-        return nomeBanco.includes(BANCO_ATIVO);
+      const data = await getHopeOperacoes({
+        pagina: pagina - 1,
+        tamanho: 20,
+        data_inicio: dataInicio ? isoDatetime(dataInicio) : undefined,
+        data_fim:    dataFim    ? isoDatetime(dataFim, true) : undefined,
       });
-      setContratos(lista);
-      const pendentes = lista.filter((c: AnyData) => /(pendente|analise|análise)/i.test(String(c.status ?? ""))).length;
-      const aprovados = lista.filter((c: AnyData) => /aprovad/i.test(String(c.status ?? ""))).length;
-      const recusados = lista.filter((c: AnyData) => /(recusad|negad)/i.test(String(c.status ?? ""))).length;
-      setStats({ pendentes, aprovados, recusados, em_analise: lista.length - pendentes - aprovados - recusados });
+      const items: AnyData[] = data?.content ?? (Array.isArray(data) ? data : []);
+      setTotalPaginas(data?.totalPages ?? 1);
+      const lista = items.map(normHopeOp);
+      setOps(lista);
+      const aprovados = lista.filter((c) => /aprov/i.test(c.status)).length;
+      const recusados = lista.filter((c) => /(recus|negad)/i.test(c.status)).length;
+      setStats({ total: lista.length, aprovados, recusados, outros: lista.length - aprovados - recusados });
     } catch (e: AnyData) {
-      setErro(e?.response?.data?.detail ?? "Erro ao buscar contratos antifraude");
+      setErro(e?.response?.data?.detail ?? "Erro ao buscar operações HOPE");
     } finally { setLoading(false); }
-  }, [esteira, pagina]);
+  }, [pagina, dataInicio, dataFim]);
 
   useEffect(() => { buscar(); }, [buscar]);
 
-  useEffect(() => {
-    Promise.all([getStormTiposRecusas(), getStormTiposPendencias()])
-      .then(([r, p]) => { setTiposRecusas(normalize(r, ["tipos"])); setTiposPendencias(normalize(p, ["tipos"])); })
-      .catch(() => {});
-  }, []);
-
-  const executar = async () => {
-    if (!acao) return;
-    setMsg(""); setErro("");
-    try {
-      if (acao.tipo === "aprovar") await aprovarContratoStorm(acao.contratoId);
-      else if (acao.tipo === "recusar") await recusarContratoStorm(acao.contratoId, { tipo_recusa_id: Number(form.tipo_id), observacao: form.observacao || undefined });
-      else if (acao.tipo === "pendenciar") await pendenciarContratoStorm(acao.contratoId, { tipo_pendencia_id: Number(form.tipo_id), observacao: form.observacao || undefined });
-      else if (acao.tipo === "reanalisar") await reanalisarContratoStorm(acao.contratoId, { observacao: form.observacao });
-      const nomes: Record<string, string> = { aprovar: "aprovado", recusar: "recusado", pendenciar: "pendenciado", reanalisar: "enviado para reanálise" };
-      setMsg(`Contrato ${nomes[acao.tipo]} com sucesso.`);
-      setAcao(null); setForm({ tipo_id: "", observacao: "" }); buscar();
-    } catch (e: AnyData) {
-      setErro(e?.response?.data?.detail ?? "Erro ao executar ação.");
-    }
-  };
-
-  const COR_ACAO: Record<string, { bg: string; color: string }> = {
-    aprovar:    { bg: "rgba(34,197,94,0.12)",  color: "#22c55e" },
-    recusar:    { bg: "rgba(220,38,38,0.12)",  color: "#DC2626" },
-    pendenciar: { bg: "rgba(234,179,8,0.12)",  color: "#eab308" },
-    reanalisar: { bg: "rgba(59,130,246,0.12)", color: "#3b82f6" },
-  };
-
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
-        <select value={esteira} onChange={(e) => setEsteira(e.target.value)} className="px-3 py-2 rounded-lg text-xs flex-1 min-w-48" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>
-          {ESTEIRAS.map((e) => <option key={e} value={e}>{e}</option>)}
-        </select>
+      {/* Filtros */}
+      <div className="flex flex-wrap items-end gap-3 p-3 rounded-xl" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
+        <div>
+          <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Data início</label>
+          <input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase mb-1 block" style={{ color: "var(--text-muted)" }}>Data fim</label>
+          <input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+        </div>
         <button onClick={() => { setPagina(1); buscar(); }} className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Buscar</button>
-        <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => setPagina((p) => p + 1)} />
+        {(dataInicio || dataFim) && (
+          <button onClick={() => { setDataInicio(""); setDataFim(""); }} className="px-3 py-2 rounded-lg text-xs font-semibold" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)" }}>Limpar datas</button>
+        )}
+        <div className="ml-auto">
+          <Paginacao pagina={pagina} onPrev={() => setPagina((p) => Math.max(1, p - 1))} onNext={() => setPagina((p) => (p < totalPaginas ? p + 1 : p))} />
+        </div>
       </div>
 
       {/* Cards de resumo */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Na fila",    value: stats.pendentes,   bg: "rgba(234,179,8,0.1)",   color: "#eab308"  },
-          { label: "Aprovados",  value: stats.aprovados,   bg: "rgba(34,197,94,0.1)",   color: "#22c55e"  },
-          { label: "Recusados",  value: stats.recusados,   bg: "rgba(220,38,38,0.1)",   color: "#DC2626"  },
-          { label: "Em análise", value: stats.em_analise,  bg: "rgba(59,130,246,0.1)",  color: "#3b82f6"  },
+          { label: "Total",      value: stats.total,     bg: "rgba(59,130,246,0.1)",  color: "#3b82f6"  },
+          { label: "Aprovados",  value: stats.aprovados, bg: "rgba(34,197,94,0.1)",   color: "#22c55e"  },
+          { label: "Recusados",  value: stats.recusados, bg: "rgba(220,38,38,0.1)",   color: "#DC2626"  },
+          { label: "Outros",     value: stats.outros,    bg: "rgba(234,179,8,0.1)",   color: "#eab308"  },
         ].map(({ label, value, bg, color }) => (
           <div key={label} className="rounded-xl p-3" style={{ backgroundColor: bg, border: `1px solid ${color}30` }}>
             <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</p>
@@ -360,100 +348,36 @@ function AbaAntifraude() {
         ))}
       </div>
 
-      {msg && <AlertOk msg={msg} />}
       {erro && <AlertErro msg={erro} />}
 
-      {loading ? <Spinner /> : contratos.length === 0 ? <EmptyState msg="Nenhum contrato na fila de antifraude." /> : (
+      {loading ? <Spinner /> : ops.length === 0 ? <EmptyState msg="Nenhuma operação encontrada." /> : (
         <div className="space-y-3">
-          {contratos.map((c: AnyData, i: number) => (
-            <Card key={c.id ?? c.ct_id ?? i}>
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="space-y-1 min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-black" style={{ color: "var(--text-primary)" }}>
-                      {c.ff ?? c.codigo ?? `#${c.id ?? c.ct_id}`}
-                    </p>
-                    {c.status && <Badge label={String(c.status)} color="blue" />}
-                    {c.esteira && <Badge label={String(c.esteira)} color="purple" />}
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-0.5">
-                    {[
-                      ["CPF", c.cpf_cliente ?? c.cpf],
-                      ["Cliente", c.cliente ?? c.cl_nome ?? c.nome_cliente],
-                      ["Banco", stormStr(c.banco) ?? stormStr(c.ba_nome)],
-                      ["Convênio", stormStr(c.convenio) ?? stormStr(c.co_nome)],
-                      ["Valor", formatBRL(c.valor_negociado ?? c.valor)],
-                      ["Produto", c.produto ?? c.pr_nome],
-                      ["Prazo", c.prazo ? `${c.prazo}x` : undefined],
-                      ["Parcela", formatBRL(c.valor_parcela)],
-                    ].filter(([, v]) => v != null && v !== "—").map(([k, v]) => (
-                      <div key={k as string}>
-                        <span className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{k}</span>
-                        <p className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{v as string}</p>
-                      </div>
-                    ))}
-                  </div>
-                  {c.observacao && <p className="text-xs italic mt-1" style={{ color: "var(--text-muted)" }}>{c.observacao}</p>}
+          {ops.map((op: AnyData) => (
+            <Card key={op.id}>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-black font-mono" style={{ color: "#DC2626" }}>#{op.id}</p>
+                  {op.status !== "—" && <Badge label={op.status} color="blue" />}
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: "rgba(220,38,38,0.1)", color: "#DC2626" }}>HOPE</span>
+                  {op.data && <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{fmtDataHora(op.data)}</span>}
                 </div>
-                <div className="flex flex-wrap gap-2 flex-shrink-0">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-0.5 mt-2">
                   {[
-                    { tipo: "aprovar",    label: "Aprovar" },
-                    { tipo: "recusar",    label: "Recusar" },
-                    { tipo: "pendenciar", label: "Pendenciar" },
-                    { tipo: "reanalisar", label: "Reanalisar" },
-                  ].map(({ tipo, label }) => (
-                    <button key={tipo} onClick={() => { setAcao({ tipo, contratoId: c.id ?? c.ct_id }); setForm({ tipo_id: "", observacao: "" }); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                      style={COR_ACAO[tipo]}
-                    >{label}</button>
+                    ["Cliente",  op.nome_cliente],
+                    ["CPF",      op.cpf_cliente],
+                    ["Convênio", op.convenio],
+                    ["Produto",  op.produto !== op.convenio ? op.produto : null],
+                    ["Valor",    formatBRL(op.valor)],
+                  ].filter(([, v]) => v && v !== "—").map(([k, v]) => (
+                    <div key={k as string}>
+                      <span className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{k}</span>
+                      <p className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>{v as string}</p>
+                    </div>
                   ))}
                 </div>
               </div>
             </Card>
           ))}
-        </div>
-      )}
-
-      {/* Modal */}
-      {acao && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.65)" }}>
-          <div className="w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
-            <h3 className="text-sm font-black uppercase" style={{ color: "var(--text-primary)" }}>
-              {acao.tipo.charAt(0).toUpperCase() + acao.tipo.slice(1)} — Contrato #{acao.contratoId}
-            </h3>
-            {acao.tipo === "recusar" && (
-              <div>
-                <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--text-muted)" }}>Motivo da recusa</label>
-                <select value={form.tipo_id} onChange={(e) => setForm((f) => ({ ...f, tipo_id: e.target.value }))} className="w-full px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>
-                  <option value="">Selecione...</option>
-                  {tiposRecusas.map((t: AnyData) => <option key={t.id} value={t.id}>{t.descricao ?? t.nome}</option>)}
-                </select>
-              </div>
-            )}
-            {acao.tipo === "pendenciar" && (
-              <div>
-                <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--text-muted)" }}>Tipo de pendência</label>
-                <select value={form.tipo_id} onChange={(e) => setForm((f) => ({ ...f, tipo_id: e.target.value }))} className="w-full px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>
-                  <option value="">Selecione...</option>
-                  {tiposPendencias.map((t: AnyData) => <option key={t.id} value={t.id}>{t.descricao ?? t.nome}</option>)}
-                </select>
-              </div>
-            )}
-            {acao.tipo !== "aprovar" && (
-              <div>
-                <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--text-muted)" }}>
-                  Observação {acao.tipo === "reanalisar" ? "(obrigatória)" : "(opcional)"}
-                </label>
-                <textarea value={form.observacao} onChange={(e) => setForm((f) => ({ ...f, observacao: e.target.value }))} rows={3} className="w-full px-3 py-2 rounded-lg text-xs resize-none" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
-              </div>
-            )}
-            {acao.tipo === "aprovar" && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Confirmar aprovação do contrato #{acao.contratoId}?</p>}
-            {erro && <AlertErro msg={erro} />}
-            <div className="flex gap-3">
-              <button onClick={() => setAcao(null)} className="flex-1 py-2 rounded-lg text-xs font-semibold" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)" }}>Cancelar</button>
-              <button onClick={executar} className="flex-1 py-2 rounded-lg text-xs font-bold text-white" style={{ backgroundColor: "#DC2626" }}>Confirmar</button>
-            </div>
-          </div>
         </div>
       )}
     </div>

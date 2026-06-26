@@ -466,6 +466,63 @@ class LogAcesso(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
 
+# ── Auditoria de Ações de Usuários ───────────────────────────────────────────
+
+class NivelRisco(str, PyEnum):
+    BAIXO = "BAIXO"
+    MEDIO = "MEDIO"
+    ALTO  = "ALTO"
+
+
+class LogAuditoria(Base):
+    """
+    Trilha de auditoria completa de ações de usuários.
+    Append-only — NUNCA alterar ou excluir registros.
+    """
+    __tablename__ = "logs_auditoria"
+    __table_args__ = (
+        Index("ix_logs_auditoria_criado_em",   "criado_em"),
+        Index("ix_logs_auditoria_usuario_id",  "usuario_id"),
+        Index("ix_logs_auditoria_risco",       "risco"),
+        Index("ix_logs_auditoria_tipo_entidade", "tipo_entidade"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+
+    # Quem fez — desnormalizado para preservar histórico mesmo se o usuário for excluído
+    usuario_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("usuarios.id"), nullable=True)
+    username:   Mapped[str | None] = mapped_column(String(100), nullable=True)
+    nome:       Mapped[str | None] = mapped_column(String(200), nullable=True)
+    perfil:     Mapped[str | None] = mapped_column(String(50),  nullable=True)
+
+    # O que foi feito
+    acao:          Mapped[str]      = mapped_column(String(300), nullable=False)
+    tipo_entidade: Mapped[str | None] = mapped_column(String(50),  nullable=True)
+    entidade_id:   Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Estado antes/depois da ação
+    antes:  Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    depois: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Classificação
+    risco: Mapped[str] = mapped_column(
+        Enum(NivelRisco, name="nivel_risco"),
+        nullable=False,
+        default=NivelRisco.BAIXO,
+    )
+
+    # Origem
+    ip:         Mapped[str | None] = mapped_column(String(45),  nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    origem:     Mapped[str]        = mapped_column(String(50),  nullable=False, default="web")
+
+    # Resultado
+    sucesso: Mapped[bool]      = mapped_column(Boolean, nullable=False, default=True)
+    erro:    Mapped[str | None] = mapped_column(Text,   nullable=True)
+
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+
 # ── Convênio (catálogo de convênios reconhecidos) ────────────────────────────
 
 class Convenio(Base):

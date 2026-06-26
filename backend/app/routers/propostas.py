@@ -11,11 +11,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
-from app.models import Proposta, StatusProposta, TipoEvento
+from app.models import Proposta, StatusProposta, TipoEvento, Usuario
 from app.schemas import (
     PropostaCreate, PropostaOut, PropostaSummary, AuditoriaOut, Mensagem
 )
-from app.services.auditoria import AuditoriaService
+from app.services.auditoria import AuditoriaService, log_auditoria
 
 # Modo dev: processa de forma síncrona (sem Celery/Redis).
 # Em produção com Docker, substitui por: from app.workers.tasks import processar_proposta
@@ -56,6 +56,8 @@ def _processar_sync(proposta_id: str):
         db2.close()
 
 processar_proposta = type("Task", (), {"apply_async": staticmethod(lambda args, **kw: _processar_sync(args[0]))})()
+
+from app.routers.auth import verificar_token
 
 router = APIRouter(prefix="/propostas", tags=["propostas"])
 
@@ -202,17 +204,34 @@ def auditoria_proposta(proposta_id: str, db: Session = Depends(get_db)):
 # ── Ações manuais (analistas) ─────────────────────────────────────────────────
 
 @router.post("/{proposta_id}/aprovar", response_model=PropostaOut)
-def aprovar_manual(proposta_id: str, request: Request, db: Session = Depends(get_db)):
+def aprovar_manual(
+    proposta_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     proposta = _get_ou_404(db, proposta_id)
     _exige_status(proposta, StatusProposta.ANALISE_MANUAL)
 
+    status_anterior = str(proposta.status)
     proposta.status = StatusProposta.APROVADA
     AuditoriaService(db).registrar(
         proposta_id,
         TipoEvento.ALTERACAO_MANUAL,
         dados={"acao": "aprovacao_manual"},
-        usuario=request.headers.get("x-usuario"),
+        usuario=usuario.username,
         ip_origem=request.client.host if request.client else None,
+    )
+    log_auditoria(
+        db,
+        acao=f"Aprovou proposta {proposta.proposta_id_externo}",
+        usuario=usuario,
+        request=request,
+        tipo_entidade="proposta",
+        entidade_id=proposta_id,
+        antes={"status": status_anterior},
+        depois={"status": "APROVADA"},
+        risco="ALTO",
     )
     db.commit()
 
@@ -221,29 +240,63 @@ def aprovar_manual(proposta_id: str, request: Request, db: Session = Depends(get
 
 
 @router.post("/{proposta_id}/bloquear", response_model=PropostaOut)
-def bloquear_manual(proposta_id: str, request: Request, db: Session = Depends(get_db)):
+def bloquear_manual(
+    proposta_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     proposta = _get_ou_404(db, proposta_id)
+    status_anterior = str(proposta.status)
     proposta.status = StatusProposta.BLOQUEADA
     AuditoriaService(db).registrar(
         proposta_id,
         TipoEvento.ALTERACAO_MANUAL,
         dados={"acao": "bloqueio_manual"},
-        usuario=request.headers.get("x-usuario"),
+        usuario=usuario.username,
         ip_origem=request.client.host if request.client else None,
+    )
+    log_auditoria(
+        db,
+        acao=f"Bloqueou proposta {proposta.proposta_id_externo}",
+        usuario=usuario,
+        request=request,
+        tipo_entidade="proposta",
+        entidade_id=proposta_id,
+        antes={"status": status_anterior},
+        depois={"status": "BLOQUEADA"},
+        risco="ALTO",
     )
     db.commit()
     return proposta
 
 
 @router.post("/{proposta_id}/reprocessar", response_model=Mensagem)
-def reprocessar(proposta_id: str, db: Session = Depends(get_db)):
+def reprocessar(
+    proposta_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     proposta = _get_ou_404(db, proposta_id)
     if proposta.status not in (StatusProposta.ERRO, StatusProposta.BLOQUEADA):
         raise HTTPException(status_code=400, detail="Apenas propostas ERRO ou BLOQUEADA podem ser reprocessadas")
 
+    status_anterior = str(proposta.status)
     proposta.status = StatusProposta.ENFILEIRADA
     proposta.ultimo_erro = None
     AuditoriaService(db).registrar(proposta_id, TipoEvento.REPROCESSAMENTO)
+    log_auditoria(
+        db,
+        acao=f"Reprocessou proposta {proposta.proposta_id_externo}",
+        usuario=usuario,
+        request=request,
+        tipo_entidade="proposta",
+        entidade_id=proposta_id,
+        antes={"status": status_anterior},
+        depois={"status": "ENFILEIRADA"},
+        risco="MEDIO",
+    )
     db.commit()
 
     processar_proposta.apply_async(args=[proposta_id], queue="propostas")

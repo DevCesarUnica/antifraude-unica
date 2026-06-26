@@ -93,6 +93,22 @@ async def criar_operacao(body: TitanCriarOperacaoRequest):
         raise _http_error(exc)
 
 
+@router.get("/operacoes")
+async def listar_operacoes(
+    pagina: int = Query(0, ge=0, description="Número da página (base-0)"),
+    tamanho: int = Query(20, ge=1, le=100),
+    status_id: int | None = Query(None, description="Filtrar por ID de status HOPE"),
+    data_inicio: str | None = Query(None, description="ISO 8601, ex: 2026-06-01T00:00:00-03:00"),
+    data_fim: str | None = Query(None, description="ISO 8601, ex: 2026-06-30T23:59:59-03:00"),
+):
+    """Lista operações HOPE/Titan paginadas com filtros opcionais."""
+    try:
+        async with TitanService() as titan:
+            return await titan.get_operations(pagina, tamanho, status_id, data_inicio, data_fim)
+    except TitanAPIError as exc:
+        raise _http_error(exc)
+
+
 @router.get("/operacoes/{operation_id}")
 async def consultar_operacao(operation_id: str):
     """Consulta o estado de uma operação pelo ID retornado pelo Titan."""

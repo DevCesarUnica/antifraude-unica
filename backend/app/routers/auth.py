@@ -3,7 +3,7 @@ Autenticação JWT — login por e-mail ou username, verificação de token.
 """
 
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
@@ -70,24 +70,32 @@ def _seed_admin(db: Session) -> None:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, db: Session = Depends(get_db)):
+def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    from app.services.auditoria import log_auditoria
     _seed_admin(db)
 
     identificador = body.identificador.strip().lower()
 
-    # Tenta por e-mail, depois por username
     usuario = (
         db.query(Usuario).filter(Usuario.email == identificador).first()
         or db.query(Usuario).filter(Usuario.username == identificador).first()
     )
 
-    if not usuario or not usuario.ativo:
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
-
-    if not verificar_senha(body.senha, usuario.senha_hash):
+    if not usuario or not usuario.ativo or not verificar_senha(body.senha, usuario.senha_hash):
+        log_auditoria(
+            db,
+            acao=f"Tentativa de login falhou: {identificador}",
+            request=request,
+            risco="MEDIO",
+            sucesso=False,
+            erro="Credenciais inválidas",
+        )
+        db.commit()
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
     token = _gerar_token(usuario.id)
+    log_auditoria(db, acao="Login no sistema", usuario=usuario, request=request, risco="BAIXO")
+    db.commit()
     return TokenResponse(access_token=token, usuario=UsuarioOut.model_validate(usuario))
 
 

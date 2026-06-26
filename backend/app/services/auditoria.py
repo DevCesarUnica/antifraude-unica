@@ -11,6 +11,58 @@ from app.models import AuditoriaLog, TipoEvento
 from app.core.logging import log
 
 
+# ── Auditoria de ações de usuários ────────────────────────────────────────────
+
+def log_auditoria(
+    db: Session,
+    acao: str,
+    usuario=None,
+    request=None,
+    tipo_entidade: str | None = None,
+    entidade_id: str | None = None,
+    antes: dict | None = None,
+    depois: dict | None = None,
+    risco: str = "BAIXO",
+    sucesso: bool = True,
+    erro: str | None = None,
+) -> None:
+    """
+    Registra ação de usuário na trilha de auditoria. Nunca propaga exceções.
+
+    Usa SAVEPOINT (begin_nested) para garantir que uma falha no registro de
+    auditoria NÃO corrompa a transação principal da requisição.
+    """
+    try:
+        from app.models import LogAuditoria
+        ip = request.client.host if (request and request.client) else None
+        user_agent = request.headers.get("user-agent") if request else None
+        perfil_val = getattr(usuario, "perfil", None)
+        entrada = LogAuditoria(
+            usuario_id=getattr(usuario, "id", None),
+            username=getattr(usuario, "username", None),
+            nome=getattr(usuario, "nome", None),
+            perfil=str(perfil_val) if perfil_val else None,
+            acao=acao,
+            tipo_entidade=tipo_entidade,
+            entidade_id=entidade_id,
+            antes=antes,
+            depois=depois,
+            risco=risco,
+            ip=ip,
+            user_agent=user_agent,
+            origem="web",
+            sucesso=sucesso,
+            erro=erro,
+        )
+        # SAVEPOINT: se o INSERT de auditoria falhar, só o savepoint é revertido.
+        # A transação externa (login, aprovação, etc.) continua intacta.
+        sp = db.begin_nested()
+        db.add(entrada)
+        sp.commit()
+    except Exception as exc:
+        log.warning("auditoria.log_erro", erro=str(exc))
+
+
 class AuditoriaService:
     def __init__(self, db: Session):
         self._db = db

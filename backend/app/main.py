@@ -55,18 +55,31 @@ async def log_acesso_middleware(request: Request, call_next):
         not any(path.startswith(p) for p in ("/health", "/docs", "/openapi", "/redoc"))
     ):
         try:
+            # Extrai usuario_id do token JWT Bearer
+            _usuario_id = None
+            _auth = request.headers.get("authorization", "")
+            if _auth.startswith("Bearer "):
+                try:
+                    from jose import jwt as _jwt
+                    _payload = _jwt.decode(
+                        _auth[7:], settings.secret_key, algorithms=[settings.jwt_algorithm]
+                    )
+                    _usuario_id = _payload.get("sub")
+                except Exception:
+                    pass
+
             db = SessionLocal()
             from app.models import LogAcesso
-            log = LogAcesso(
-                usuario_id=request.headers.get("x-usuario-id"),
-                username=request.headers.get("x-usuario"),
+            entrada = LogAcesso(
+                usuario_id=_usuario_id,
+                username=None,
                 metodo=request.method,
                 endpoint=path,
                 ip=request.client.host if request.client else None,
                 status_code=response.status_code,
                 duracao_ms=duracao_ms,
             )
-            db.add(log)
+            db.add(entrada)
             db.commit()
         except Exception:
             pass

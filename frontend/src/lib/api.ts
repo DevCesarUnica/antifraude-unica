@@ -84,6 +84,14 @@ export const getTitanReferencia = (forceRefresh = false) =>
 export const invalidarCacheTitan = (endpoint?: string) =>
   api.delete("/titan/cache", { params: endpoint ? { endpoint } : {} }).then((r) => r.data);
 
+export const getHopeOperacoes = (params?: {
+  pagina?: number;
+  tamanho?: number;
+  status_id?: number;
+  data_inicio?: string;
+  data_fim?: string;
+}) => api.get("/titan/operacoes", { params }).then((r) => r.data);
+
 // ── Bancos ────────────────────────────────────────────────────────────────────
 
 export const getBancosIntegracoes = () =>
@@ -341,6 +349,32 @@ export const getLogsAcesso = (params?: { metodo?: string; endpoint?: string; sta
 
 export const getResumoLogs = () =>
   api.get("/logs/acesso/resumo").then((r) => r.data);
+
+export const getLogsAuditoria = (params?: Record<string, unknown>) =>
+  api.get("/logs/auditoria", { params }).then((r) => r.data);
+
+export const getResumoAuditoria = () =>
+  api.get("/logs/auditoria/resumo").then((r) => r.data);
+
+export const getLogsSuspeitos = () =>
+  api.get("/logs/suspeitos").then((r) => r.data);
+
+export const exportarLogsExcel = async (params?: Record<string, unknown>) => {
+  const response = await api.get("/logs/auditoria/exportar", {
+    params,
+    responseType: "blob",
+  });
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement("a");
+  link.href = url;
+  const cd = response.headers["content-disposition"] ?? "";
+  const match = cd.match(/filename="?([^"]+)"?/);
+  link.download = match ? match[1] : "auditoria.xlsx";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
 
 // ── Convênios ─────────────────────────────────────────────────────────────────
 

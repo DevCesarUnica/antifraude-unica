@@ -2,13 +2,14 @@
 Gestão de usuários — apenas admins e gestores podem acessar.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Usuario
 from app.schemas import UsuarioCreate, UsuarioUpdate, UsuarioOut
 from app.routers.auth import verificar_token, hash_senha
+from app.services.auditoria import log_auditoria
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
 
@@ -30,6 +31,7 @@ def listar(
 @router.post("/", response_model=UsuarioOut, status_code=201)
 def criar(
     body: UsuarioCreate,
+    request: Request,
     db: Session = Depends(get_db),
     atual: Usuario = Depends(_exige_admin_ou_gestor),
 ):
@@ -48,6 +50,17 @@ def criar(
         ativo=True,
     )
     db.add(usuario)
+    db.flush()
+    log_auditoria(
+        db,
+        acao=f"Criou usuário {body.username.lower()}",
+        usuario=atual,
+        request=request,
+        tipo_entidade="usuario",
+        entidade_id=usuario.id,
+        depois={"username": usuario.username, "perfil": str(usuario.perfil), "nome": usuario.nome},
+        risco="ALTO",
+    )
     db.commit()
     db.refresh(usuario)
     return UsuarioOut.model_validate(usuario)
@@ -57,6 +70,7 @@ def criar(
 def atualizar(
     usuario_id: str,
     body: UsuarioUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     atual: Usuario = Depends(_exige_admin_ou_gestor),
 ):
@@ -64,9 +78,15 @@ def atualizar(
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
-    # Admin não pode ser desativado por gestor
     if usuario.perfil == "admin" and atual.perfil != "admin":
         raise HTTPException(status_code=403, detail="Apenas admin pode alterar outro admin")
+
+    antes = {
+        "nome": usuario.nome,
+        "cargo": usuario.cargo,
+        "perfil": str(usuario.perfil),
+        "ativo": usuario.ativo,
+    }
 
     if body.nome is not None:
         usuario.nome = body.nome
@@ -79,6 +99,23 @@ def atualizar(
     if body.senha is not None:
         usuario.senha_hash = hash_senha(body.senha)
 
+    depois = {
+        "nome": usuario.nome,
+        "cargo": usuario.cargo,
+        "perfil": str(usuario.perfil),
+        "ativo": usuario.ativo,
+    }
+    log_auditoria(
+        db,
+        acao=f"Atualizou usuário {usuario.username}",
+        usuario=atual,
+        request=request,
+        tipo_entidade="usuario",
+        entidade_id=usuario_id,
+        antes=antes,
+        depois=depois,
+        risco="MEDIO",
+    )
     db.commit()
     db.refresh(usuario)
     return UsuarioOut.model_validate(usuario)
@@ -87,6 +124,7 @@ def atualizar(
 @router.delete("/{usuario_id}", status_code=204)
 def desativar(
     usuario_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     atual: Usuario = Depends(_exige_admin_ou_gestor),
 ):
@@ -96,12 +134,24 @@ def desativar(
     if usuario.id == atual.id:
         raise HTTPException(status_code=400, detail="Não é possível desativar a si mesmo")
     usuario.ativo = False
+    log_auditoria(
+        db,
+        acao=f"Desativou usuário {usuario.username}",
+        usuario=atual,
+        request=request,
+        tipo_entidade="usuario",
+        entidade_id=usuario_id,
+        antes={"ativo": True},
+        depois={"ativo": False},
+        risco="ALTO",
+    )
     db.commit()
 
 
 @router.delete("/{usuario_id}/excluir", status_code=204)
 def excluir(
     usuario_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     atual: Usuario = Depends(_exige_admin_ou_gestor),
 ):
@@ -112,5 +162,15 @@ def excluir(
         raise HTTPException(status_code=400, detail="Não é possível excluir a si mesmo")
     if usuario.perfil == "admin" and atual.perfil != "admin":
         raise HTTPException(status_code=403, detail="Apenas admin pode excluir outro admin")
+    log_auditoria(
+        db,
+        acao=f"Excluiu usuário {usuario.username}",
+        usuario=atual,
+        request=request,
+        tipo_entidade="usuario",
+        entidade_id=usuario_id,
+        antes={"username": usuario.username, "perfil": str(usuario.perfil), "nome": usuario.nome},
+        risco="ALTO",
+    )
     db.delete(usuario)
     db.commit()

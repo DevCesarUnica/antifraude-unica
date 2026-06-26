@@ -479,6 +479,30 @@ class ConvenioOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Auditoria de Ações de Usuários ───────────────────────────────────────────
+
+class LogAuditoriaOut(BaseModel):
+    id: str
+    usuario_id: str | None
+    username: str | None
+    nome: str | None
+    perfil: str | None
+    acao: str
+    tipo_entidade: str | None
+    entidade_id: str | None
+    antes: dict | None
+    depois: dict | None
+    risco: str
+    ip: str | None
+    user_agent: str | None
+    origem: str
+    sucesso: bool
+    erro: str | None
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Genérico ──────────────────────────────────────────────────────────────────
 
 class Mensagem(BaseModel):

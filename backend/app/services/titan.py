@@ -429,6 +429,24 @@ class TitanService:
         """Consulta uma operação existente pelo ID (sem cache — dado muda de estado)."""
         return await self._fetch(f"/operations/{operation_id}")
 
+    async def get_operations(
+        self,
+        pagina: int = 0,
+        page_size: int = 20,
+        status_id: int | None = None,
+        data_inicio: str | None = None,
+        data_fim: str | None = None,
+    ) -> Any:
+        """Lista operações paginadas (sem cache — dado muda frequentemente)."""
+        endpoint = f"/operations?pageNumber={pagina}&pageSize={page_size}&sort=id,DESC"
+        if status_id is not None:
+            endpoint += f"&filters[operationStatusID][$eq]={status_id}"
+        if data_inicio:
+            endpoint += f"&filters[createdAt][$gte]={data_inicio}"
+        if data_fim:
+            endpoint += f"&filters[createdAt][$lte]={data_fim}"
+        return await self._fetch(endpoint)
+
     # ── Invalidar cache ────────────────────────────────────────────────────────
 
     async def invalidar_cache(self, endpoint: str | None = None) -> None:

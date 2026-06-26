@@ -18,6 +18,7 @@ from app.schemas import (
     AuditoriaOut, Mensagem,
 )
 from app.services.auditoria import AuditoriaService, log_auditoria
+from app.services.propostas_dashboard import query_dashboard
 
 # Modo dev: processa de forma síncrona (sem Celery/Redis).
 # Em produção com Docker, substitui por: from app.workers.tasks import processar_proposta
@@ -158,76 +159,6 @@ def resumo_propostas(db: Session = Depends(get_db)):
 
 # ── Dashboard operacional ─────────────────────────────────────────────────────
 
-def _determinar_origem(proposta_id_externo: str) -> str:
-    if proposta_id_externo.startswith("titan-"):
-        return "hope"
-    if proposta_id_externo.startswith("storm-"):
-        return "storm"
-    return "manual"
-
-
-def _normalizar_proposta(p: Proposta) -> dict:
-    """
-    Normaliza uma proposta para o dashboard operacional.
-    Detecta a origem pelo prefixo do ID externo — nunca assume banco fixo.
-    """
-    payload = p.payload_original or {}
-    decisao = p.decisao_detalhes or {}
-
-    observacoes = (
-        p.ultimo_erro
-        or decisao.get("motivo_principal")
-        or payload.get("observacoes")
-        or payload.get("obs")
-        or None
-    )
-
-    data_agendamento = payload.get("data_agendamento") or payload.get("agendamento") or None
-    if isinstance(data_agendamento, str) and not data_agendamento.strip():
-        data_agendamento = None
-
-    possui_arquivos = bool(
-        payload.get("arquivos")
-        or payload.get("documentos")
-        or payload.get("files")
-        or payload.get("anexos")
-    )
-
-    return {
-        "id": p.id,
-        "ade": p.proposta_id_externo,
-        "banco": p.banco,
-        "convenio": p.convenio,
-        "produto": p.produto,
-        "corretor": p.corretor.nome if p.corretor else None,
-        "corretor_id": p.corretor_id,
-        "valor": p.valor,
-        "status": str(p.status.value if hasattr(p.status, "value") else p.status),
-        "cpf": p.cpf_cliente,
-        "nome_cliente": p.nome_cliente,
-        "uf_cliente": p.uf_cliente,
-        "observacoes": observacoes,
-        "data_importacao": p.criado_em,
-        "data_atualizacao": p.atualizado_em,
-        "data_agendamento": str(data_agendamento) if data_agendamento else None,
-        "possui_arquivos": possui_arquivos,
-        "score_fraude": p.score_fraude,
-        "resultado_motor": p.resultado_motor,
-        "origem": _determinar_origem(p.proposta_id_externo),
-        "tentativas": p.tentativas,
-    }
-
-
-_SORT_COLS = {
-    "criado_em":    lambda: Proposta.criado_em,
-    "atualizado_em":lambda: Proposta.atualizado_em,
-    "valor":        lambda: Proposta.valor,
-    "status":       lambda: Proposta.status,
-    "banco":        lambda: Proposta.banco,
-    "nome_cliente": lambda: Proposta.nome_cliente,
-}
-
-
 @router.get("/dashboard", response_model=PropostasDashboardResponse)
 def dashboard_propostas(
     banco: str | None = None,
@@ -247,47 +178,15 @@ def dashboard_propostas(
     _: Usuario = Depends(verificar_token),
 ):
     """Painel operacional da mesa de crédito — propostas normalizadas com filtros e ordenação."""
-    from datetime import datetime as _dt
-    from sqlalchemy.orm import joinedload
-    from app.models import Corretor
-
-    q = db.query(Proposta).options(joinedload(Proposta.corretor))
-
-    if banco:
-        q = q.filter(Proposta.banco.ilike(f"%{banco}%"))
-    if status:
-        q = q.filter(Proposta.status == status.upper())
-    if cpf:
-        digits = cpf.replace(".", "").replace("-", "").replace("/", "")
-        q = q.filter(Proposta.cpf_cliente.ilike(f"%{digits}%"))
-    if nome:
-        q = q.filter(Proposta.nome_cliente.ilike(f"%{nome}%"))
-    if corretor:
-        q = q.join(Corretor, Proposta.corretor_id == Corretor.id, isouter=True)
-        q = q.filter(Corretor.nome.ilike(f"%{corretor}%"))
-    if valor_min is not None:
-        q = q.filter(Proposta.valor >= valor_min)
-    if valor_max is not None:
-        q = q.filter(Proposta.valor <= valor_max)
-    if data_inicio:
-        q = q.filter(Proposta.criado_em >= data_inicio)
-    if data_fim:
-        q = q.filter(Proposta.criado_em <= data_fim)
-
-    total = q.count()
-
-    col_fn = _SORT_COLS.get(order_by, _SORT_COLS["criado_em"])
-    col = col_fn()
-    ordenado = col.desc() if order_dir.lower() != "asc" else col.asc()
-
-    items = q.order_by(ordenado).offset(skip).limit(min(limit, 200)).all()
-
-    return {
-        "items": [_normalizar_proposta(p) for p in items],
-        "total": total,
-        "skip": skip,
-        "limit": limit,
-    }
+    items, total = query_dashboard(
+        db,
+        banco=banco, status=status, cpf=cpf, nome=nome, corretor=corretor,
+        valor_min=valor_min, valor_max=valor_max,
+        data_inicio=data_inicio, data_fim=data_fim,
+        order_by=order_by, order_dir=order_dir,
+        skip=skip, limit=limit,
+    )
+    return {"items": items, "total": total, "skip": skip, "limit": limit}
 
 
 # ── Individual ────────────────────────────────────────────────────────────────

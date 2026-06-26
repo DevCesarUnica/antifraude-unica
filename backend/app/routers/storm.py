@@ -8,6 +8,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.services.storm import StormService, StormAPIError, StormAuthError, StormPermissionError
+from app.routers.auth import verificar_token
+from app.models import Usuario
+from fastapi import Depends
 
 router = APIRouter(prefix="/storm", tags=["storm"])
 
@@ -20,6 +23,31 @@ def _handle_error(exc: Exception):
         # 502 em vez de 401 — evita que o frontend interprete como sessão expirada
         raise HTTPException(status_code=502, detail=str(exc))
     raise HTTPException(status_code=503, detail=str(exc))
+
+
+# ── Sincronização de propostas ────────────────────────────────────────────────
+
+@router.post("/sync")
+async def sincronizar_propostas(
+    max_paginas: int = Query(default=20, ge=1, le=100),
+    id_banco: int | None = Query(default=None, description="Filtrar por ID do banco Storm"),
+    id_status: int | None = Query(default=None, description="Filtrar por ID de status do contrato"),
+    data_inicio: str | None = Query(default=None, description="Ex: 2026-06-01"),
+    data_fim: str | None = Query(default=None, description="Ex: 2026-06-30"),
+    _: Usuario = Depends(verificar_token),
+):
+    """
+    Importa contratos do Storm como propostas e os processa pelo motor antifraude.
+    Contratos já importados são ignorados (idempotente via proposta_id_externo).
+    """
+    from app.services.storm_sync import sincronizar
+    return await sincronizar(
+        max_paginas=max_paginas,
+        id_banco=id_banco,
+        id_status=id_status,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+    )
 
 
 # ── Status ────────────────────────────────────────────────────────────────────

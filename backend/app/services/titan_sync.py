@@ -11,13 +11,13 @@ Fluxo:
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Any
 
 from app.core.logging import log
 from app.database import SessionLocal
 from app.models import Proposta, StatusProposta, TipoEvento
 from app.services.auditoria import AuditoriaService
+from app.services.hope_adapter import mapear_operacao
 from app.services.titan import TitanService, TitanAPIError
 
 
@@ -25,46 +25,6 @@ def _processar(proposta_id: str) -> None:
     from app.routers.propostas import processar_proposta
     processar_proposta.apply_async(args=[proposta_id], queue="propostas")
 
-
-def _cpf_digits(v: str | None) -> str | None:
-    if not v:
-        return None
-    digits = re.sub(r"\D", "", v)
-    return digits if len(digits) in (11, 14) else None
-
-
-def _map_operacao(op: dict) -> dict | None:
-    """Converte uma operação Titan no dict aceito por PropostaCreate."""
-    op_id = op.get("id")
-    if not op_id:
-        return None
-
-    customer = op.get("customer") or {}
-    person = customer.get("person") or {}
-    product = op.get("product") or {}
-    originating = op.get("originatingCompany") or {}
-
-    cpf = _cpf_digits(person.get("documentNumber"))
-    if not cpf:
-        return None
-
-    valor = op.get("requestedValue") or 0.0
-    if valor <= 0:
-        return None
-
-    banco = "HOPE"
-
-    return {
-        "proposta_id_externo": f"titan-{op_id}",
-        "cpf_cliente": cpf,
-        "nome_cliente": person.get("fullName"),
-        "uf_cliente": None,
-        "banco": banco,
-        "convenio": originating.get("tradeName"),
-        "produto": product.get("name"),
-        "valor": float(valor),
-        "payload_original": op,
-    }
 
 
 
@@ -116,7 +76,7 @@ async def sincronizar(
                     break
 
                 for op in items:
-                    dados = _map_operacao(op)
+                    dados = mapear_operacao(op)
                     if dados is None:
                         erros += 1
                         continue

@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { getPropostasDashboard, aprovarProposta, bloquearProposta, reprocessarProposta } from "@/lib/api";
@@ -42,6 +43,317 @@ function safe(v: unknown): string {
   return String(v) || "—";
 }
 
+// ── Info de colunas ───────────────────────────────────────────────────────────
+
+interface ColInfoData {
+  title: string;
+  icon: string;
+  description: string;
+  details: string[];
+}
+
+const COL_INFO: Record<string, ColInfoData> = {
+  ade: {
+    title: "Proposta (ADE)",
+    icon: "🔢",
+    description: "Código identificador único da proposta no sistema antifraude, gerado automaticamente no momento da importação.",
+    details: [
+      "O chip colorido ao lado indica a origem: HOPE (vermelho), STORM (azul) ou MANUAL (cinza).",
+      "Use este código para rastrear a proposta em auditorias e comunicações com o banco.",
+      "Clique no cabeçalho para ordenar por código de proposta.",
+    ],
+  },
+  arq: {
+    title: "Arquivos Anexados",
+    icon: "📎",
+    description: "Indica se a proposta possui documentos ou comprovantes vinculados.",
+    details: [
+      "📎 verde = há arquivos anexados (documentos, contratos, fotos, comprovantes).",
+      "— = nenhum arquivo foi vinculado a esta proposta.",
+      "Propostas com documentação completa agilizam a análise e aprovação.",
+    ],
+  },
+  banco: {
+    title: "Banco",
+    icon: "🏦",
+    description: "Instituição financeira responsável pela concessão e processamento do crédito.",
+    details: [
+      "Indica qual banco receberá a proposta após aprovação pela mesa de crédito.",
+      "Cada banco possui regras, prazos e critérios próprios de análise.",
+      "Clique no cabeçalho para agrupar e ordenar por banco.",
+    ],
+  },
+  convenio: {
+    title: "Convênio",
+    icon: "🤝",
+    description: "Entidade ou empresa conveniada que autoriza o desconto em folha de pagamento do cliente.",
+    details: [
+      "Pode ser INSS, Prefeitura, Governo Estadual, Forças Armadas ou empresa privada.",
+      "O convênio define a margem consignável disponível e as regras de elegibilidade.",
+      "Propostas sem convênio identificado podem exigir validação adicional pela equipe.",
+    ],
+  },
+  produto: {
+    title: "Produto",
+    icon: "📋",
+    description: "Modalidade da operação de crédito ofertada ao cliente.",
+    details: [
+      "Exemplos: Crédito Consignado, Refinanciamento, Portabilidade, Novo Empréstimo, Cartão.",
+      "Cada produto tem taxas, prazos e regras de margem distintos.",
+      "O tipo de produto impacta diretamente nos critérios de análise do motor antifraude.",
+    ],
+  },
+  corretor: {
+    title: "Corretor",
+    icon: "👤",
+    description: "Profissional responsável pela captação, cadastro e envio da proposta.",
+    details: [
+      "Cada proposta é vinculada ao corretor que a inseriu no sistema.",
+      "O histórico individual pode ser consultado nos relatórios de desempenho.",
+      "Padrões suspeitos de um mesmo corretor são sinalizados automaticamente pelo motor de regras.",
+    ],
+  },
+  valor: {
+    title: "Valor da Operação",
+    icon: "💰",
+    description: "Valor bruto da operação em reais, conforme informado na proposta.",
+    details: [
+      "Exibido no formato R$ com separador de milhar e duas casas decimais.",
+      "Representa o valor total liberado ao cliente, antes de tarifas e encargos.",
+      "Clique no cabeçalho para ordenar do menor para o maior valor e vice-versa.",
+    ],
+  },
+  status: {
+    title: "Situação da Proposta",
+    icon: "🚦",
+    description: "Status atual da proposta no fluxo de análise antifraude.",
+    details: [
+      "🟡 Analisar — aguardando revisão manual pela equipe da mesa de crédito.",
+      "🔵 Em Análise — em processamento automático pelo motor de regras.",
+      "⚫ Enfileirada — na fila de entrada, aguardando início do processamento.",
+      "🟢 Aprovada / Confirmada — liberada e confirmada para envio ao banco.",
+      "🟣 Enviada — encaminhada ao banco aguardando contratação.",
+      "🔴 Bloqueada / Reprovada — barrada por suspeita de fraude ou não conformidade.",
+      "🟠 Erro — falha técnica no processamento; utilize 'Reprocessar' para nova tentativa.",
+    ],
+  },
+  cpf: {
+    title: "CPF do Cliente",
+    icon: "🪪",
+    description: "Cadastro de Pessoa Física do titular da proposta de crédito.",
+    details: [
+      "Exibido no formato 000.000.000-00 para facilitar leitura e conferência.",
+      "Utilizado para verificar duplicidades e histórico de propostas do mesmo cliente.",
+      "O motor antifraude cruza o CPF com listas de restrição, blacklist interna e base de fraudes.",
+    ],
+  },
+  nome_cliente: {
+    title: "Nome do Cliente",
+    icon: "🧑",
+    description: "Nome completo do titular da proposta conforme cadastro.",
+    details: [
+      "Deve coincidir com o documento de identidade e o cadastro na entidade conveniada.",
+      "Clique no cabeçalho para ordenar as propostas alfabeticamente por nome.",
+      "Quando o nome é truncado, passe o mouse sobre ele para ver o nome completo.",
+    ],
+  },
+  obs: {
+    title: "Observações",
+    icon: "📝",
+    description: "Campo livre para anotações internas da equipe sobre a proposta.",
+    details: [
+      "Registra justificativas de decisão, pendências, alertas ou informações adicionais.",
+      "Visível apenas para a equipe interna — não é transmitido ao banco.",
+      "Passe o mouse sobre o texto truncado para visualizar a observação completa.",
+    ],
+  },
+  criado_em: {
+    title: "Data de Importação",
+    icon: "📥",
+    description: "Data e hora em que a proposta entrou no sistema antifraude.",
+    details: [
+      "Registrado automaticamente ao importar via integração (HOPE/STORM) ou cadastro manual.",
+      "Exibido no formato DD/MM/AAAA HH:MM (horário de Brasília).",
+      "Clique no cabeçalho para ordenar pelas propostas mais recentes ou mais antigas.",
+    ],
+  },
+  atualizado_em: {
+    title: "Última Atualização",
+    icon: "🔄",
+    description: "Data e hora da última modificação de status ou dados da proposta.",
+    details: [
+      "Atualizado automaticamente a cada mudança de status, edição de dados ou nova ação.",
+      "Permite identificar propostas estagnadas que podem precisar de atenção.",
+      "Clique no cabeçalho para ordenar pelas propostas mais recentemente movimentadas.",
+    ],
+  },
+  agend: {
+    title: "Agendamento",
+    icon: "📅",
+    description: "Data programada para análise, contato ou ação sobre a proposta.",
+    details: [
+      "Permite à mesa de crédito organizar a fila de trabalho por data prevista.",
+      "Propostas sem agendamento definido exibem '—'.",
+      "Utilize o agendamento para priorizar propostas com prazo ou compromisso definido.",
+    ],
+  },
+  acoes: {
+    title: "Ações Disponíveis",
+    icon: "⚡",
+    description: "Abre o painel de operações para executar ações sobre a proposta selecionada.",
+    details: [
+      "Aprovar — libera a proposta e encaminha ao banco para contratação.",
+      "Bloquear — marca como suspeita, impede o envio e registra o motivo.",
+      "Reprocessar — reenvia ao motor antifraude para nova análise automática.",
+      "Detalhes — exibe o histórico completo, documentos e todos os dados da proposta.",
+    ],
+  },
+};
+
+// ── Popup de informação de coluna ─────────────────────────────────────────────
+
+function ColInfoButton({ colKey }: { colKey: string }) {
+  const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const info = COL_INFO[colKey];
+
+  useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      if (
+        btnRef.current?.contains(e.target as Node) ||
+        popupRef.current?.contains(e.target as Node)
+      ) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
+  if (!info) return null;
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const popupW = 310;
+      let left = rect.left;
+      if (left + popupW > window.innerWidth - 12) left = window.innerWidth - popupW - 12;
+      if (left < 12) left = 12;
+      setPos({ top: rect.bottom + 6, left });
+    }
+    setOpen((o) => !o);
+  };
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={handleClick}
+        title={`O que é ${info.title}?`}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: 14, height: 14, borderRadius: "50%",
+          fontSize: 8, fontWeight: 800, lineHeight: 1,
+          backgroundColor: open ? "rgba(96,165,250,0.3)" : "rgba(96,165,250,0.12)",
+          color: open ? "#93c5fd" : "#60a5fa",
+          border: `1px solid ${open ? "rgba(96,165,250,0.5)" : "rgba(96,165,250,0.25)"}`,
+          cursor: "pointer", flexShrink: 0,
+          transition: "all 0.15s ease",
+          verticalAlign: "middle",
+        }}
+      >
+        ?
+      </button>
+
+      {mounted && open && createPortal(
+        <div
+          ref={popupRef}
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            zIndex: 99999,
+            width: 310,
+            backgroundColor: "#0f1520",
+            border: "1px solid rgba(96,165,250,0.2)",
+            borderRadius: 12,
+            boxShadow: "0 24px 64px rgba(0,0,0,0.7), 0 0 0 1px rgba(96,165,250,0.08), inset 0 1px 0 rgba(255,255,255,0.04)",
+            overflow: "hidden",
+            opacity: 1,
+          }}
+        >
+          {/* Accent line */}
+          <div style={{ height: 2, background: "linear-gradient(90deg, #3b82f6, #8b5cf6)" }} />
+
+          {/* Header */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "12px 14px 10px",
+            borderBottom: "1px solid rgba(255,255,255,0.05)",
+          }}>
+            <span style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+              backgroundColor: "rgba(59,130,246,0.12)",
+              fontSize: 16,
+            }}>
+              {info.icon}
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 10, fontWeight: 800, color: "#e2e8f0", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                {info.title}
+              </p>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+              style={{
+                background: "none", border: "none", color: "#475569",
+                cursor: "pointer", fontSize: 12, lineHeight: 1,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 20, height: 20, borderRadius: 4,
+                transition: "color 0.1s",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#94a3b8")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "#475569")}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Body */}
+          <div style={{ padding: "12px 14px 14px" }}>
+            <p style={{ margin: "0 0 12px", fontSize: 12, color: "#94a3b8", lineHeight: 1.6 }}>
+              {info.description}
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              {info.details.map((d, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <span style={{ color: "#3b82f6", fontWeight: 700, fontSize: 11, flexShrink: 0, marginTop: 1 }}>›</span>
+                  <span style={{ fontSize: 11, color: "#64748b", lineHeight: 1.55 }}>{d}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div style={{ padding: "8px 14px", borderTop: "1px solid rgba(255,255,255,0.04)", backgroundColor: "rgba(0,0,0,0.2)" }}>
+            <p style={{ margin: 0, fontSize: 10, color: "#334155", fontStyle: "italic" }}>
+              Mesa de Crédito · Sistema Antifraude Unica
+            </p>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // ── Badge de status ──────────────────────────────────────────────────────────
 
 const STATUS_META: Record<string, { label: string; bg: string; color: string }> = {
@@ -82,10 +394,11 @@ function OrigemChip({ origem }: { origem: string }) {
 // ── Cabeçalho de coluna ordenável ────────────────────────────────────────────
 
 function ColHeader({
-  label, col, orderBy, orderDir, onSort,
+  label, col, orderBy, orderDir, onSort, infoKey,
 }: {
   label: string; col: string; orderBy: string; orderDir: "asc" | "desc";
   onSort: (col: string) => void;
+  infoKey?: string;
 }) {
   const ativo = orderBy === col;
   return (
@@ -94,8 +407,11 @@ function ColHeader({
       className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap"
       style={{ color: ativo ? "var(--text-primary)" : "var(--text-muted)" }}
     >
-      {label}{" "}
-      {ativo && <span style={{ opacity: 0.7 }}>{orderDir === "desc" ? "↓" : "↑"}</span>}
+      <span className="inline-flex items-center gap-1.5">
+        {label}
+        {ativo && <span style={{ opacity: 0.7 }}>{orderDir === "desc" ? "↓" : "↑"}</span>}
+        {infoKey && <ColInfoButton colKey={infoKey} />}
+      </span>
     </th>
   );
 }
@@ -287,21 +603,37 @@ export default function DashboardPropostasTable() {
           <table className="w-full text-xs" style={{ minWidth: 1200 }}>
             <thead>
               <tr style={{ backgroundColor: "var(--bg-mid)", borderBottom: "2px solid var(--border)" }}>
-                <ColHeader label="Proposta (ADE)" col="ade"          orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
-                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Arq.</th>
-                <ColHeader label="Banco"          col="banco"        orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
-                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Convênio</th>
-                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Produto</th>
-                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Corretor</th>
-                <ColHeader label="Valor"          col="valor"        orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
-                <ColHeader label="Situação"       col="status"       orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
-                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>CPF</th>
-                <ColHeader label="Cliente"        col="nome_cliente" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
-                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Obs.</th>
-                <ColHeader label="Importação"     col="criado_em"    orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
-                <ColHeader label="Atualização"    col="atualizado_em" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} />
-                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Agend.</th>
-                <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Ações</th>
+                <ColHeader label="Proposta (ADE)" col="ade"           orderBy={orderBy} orderDir={orderDir} onSort={handleSort} infoKey="ade" />
+                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
+                  <span className="inline-flex items-center gap-1.5">Arq. <ColInfoButton colKey="arq" /></span>
+                </th>
+                <ColHeader label="Banco"          col="banco"         orderBy={orderBy} orderDir={orderDir} onSort={handleSort} infoKey="banco" />
+                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
+                  <span className="inline-flex items-center gap-1.5">Convênio <ColInfoButton colKey="convenio" /></span>
+                </th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
+                  <span className="inline-flex items-center gap-1.5">Produto <ColInfoButton colKey="produto" /></span>
+                </th>
+                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
+                  <span className="inline-flex items-center gap-1.5">Corretor <ColInfoButton colKey="corretor" /></span>
+                </th>
+                <ColHeader label="Valor"          col="valor"         orderBy={orderBy} orderDir={orderDir} onSort={handleSort} infoKey="valor" />
+                <ColHeader label="Situação"       col="status"        orderBy={orderBy} orderDir={orderDir} onSort={handleSort} infoKey="status" />
+                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
+                  <span className="inline-flex items-center gap-1.5">CPF <ColInfoButton colKey="cpf" /></span>
+                </th>
+                <ColHeader label="Cliente"        col="nome_cliente"  orderBy={orderBy} orderDir={orderDir} onSort={handleSort} infoKey="nome_cliente" />
+                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
+                  <span className="inline-flex items-center gap-1.5">Obs. <ColInfoButton colKey="obs" /></span>
+                </th>
+                <ColHeader label="Importação"     col="criado_em"     orderBy={orderBy} orderDir={orderDir} onSort={handleSort} infoKey="criado_em" />
+                <ColHeader label="Atualização"    col="atualizado_em" orderBy={orderBy} orderDir={orderDir} onSort={handleSort} infoKey="atualizado_em" />
+                <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
+                  <span className="inline-flex items-center gap-1.5">Agend. <ColInfoButton colKey="agend" /></span>
+                </th>
+                <th className="px-3 py-2.5 text-right text-[10px] font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
+                  <span className="inline-flex items-center justify-end gap-1.5">Ações <ColInfoButton colKey="acoes" /></span>
+                </th>
               </tr>
             </thead>
             <tbody>

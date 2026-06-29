@@ -5,7 +5,7 @@ Regra de ouro: NUNCA atualizar ou deletar registros de auditoria.
 Toda alteração de estado gera um novo registro.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app.models import AuditoriaLog, TipoEvento
 from app.core.logging import log
@@ -81,7 +81,7 @@ class AuditoriaService:
             dados=dados or {},
             usuario=usuario,
             ip_origem=ip_origem,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
         self._db.add(entrada)
         self._db.flush()

@@ -4,7 +4,7 @@ Todos usam UUID como PK para evitar colisões em ambiente distribuído.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
@@ -23,7 +23,7 @@ def _uuid():
 
 
 def _now():
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 # ── Enums ────────────────────────────────────────────────────────────────────
@@ -77,8 +77,8 @@ class GrupoCorretor(Base):
     descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
     limite_valor: Mapped[float] = mapped_column(Float, default=0.0)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     corretores = relationship("Corretor", back_populates="grupo")
 
@@ -98,8 +98,8 @@ class Corretor(Base):
     limite_valor_diario: Mapped[float] = mapped_column(Float, default=0.0)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     metadados: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     grupo = relationship("GrupoCorretor", back_populates="corretores")
     propostas = relationship("Proposta", back_populates="corretor")
@@ -122,7 +122,7 @@ class ContatoCorretor(Base):
     valor: Mapped[str] = mapped_column(String(200), nullable=False)
     principal: Mapped[bool] = mapped_column(Boolean, default=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     corretor = relationship("Corretor", back_populates="contatos")
 
@@ -172,8 +172,8 @@ class Proposta(Base):
     # Controle
     tentativas: Mapped[int] = mapped_column(Integer, default=0)
     ultimo_erro: Mapped[str | None] = mapped_column(Text, nullable=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     corretor = relationship("Corretor", back_populates="propostas")
     auditoria = relationship("AuditoriaLog", back_populates="proposta", order_by="AuditoriaLog.timestamp")
@@ -200,8 +200,8 @@ class RegraAntifraude(Base):
     prioridade: Mapped[int] = mapped_column(Integer, default=100)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     versao: Mapped[int] = mapped_column(Integer, default=1)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
 # ── Blacklist ─────────────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ class Blacklist(Base):
     fonte: Mapped[str | None] = mapped_column(String(200), nullable=True)
     adicionado_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 # ── Auditoria (append-only, NUNCA alterar registros) ─────────────────────────
@@ -250,7 +250,7 @@ class AuditoriaLog(Base):
     dados: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     usuario: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ip_origem: Mapped[str | None] = mapped_column(String(45), nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
     proposta = relationship("Proposta", back_populates="auditoria")
 
@@ -279,8 +279,8 @@ class Usuario(Base):
     )
     senha_hash: Mapped[str] = mapped_column(String(200), nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
 # ── Layout de Importação ─────────────────────────────────────────────────────
@@ -301,8 +301,8 @@ class LayoutImportacao(Base):
     encoding: Mapped[str] = mapped_column(String(20), default="utf-8")
     tem_cabecalho: Mapped[bool] = mapped_column(Boolean, default=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     mapeamentos = relationship("MapeamentoDados", back_populates="layout", cascade="all, delete-orphan")
     importacoes = relationship("ImportacaoProposta", back_populates="layout")
@@ -345,8 +345,8 @@ class ImportacaoProposta(Base):
     status: Mapped[str] = mapped_column(Enum(StatusImportacao, name="status_importacao"), default=StatusImportacao.PENDENTE)
     log_erros: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     criado_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
-    concluido_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    concluido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     layout = relationship("LayoutImportacao", back_populates="importacoes")
 
@@ -362,8 +362,8 @@ class ImportacaoCorretor(Base):
     status: Mapped[str] = mapped_column(String(20), default="PENDENTE")
     log_erros: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     criado_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
-    concluido_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    concluido_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # ── Averbação ─────────────────────────────────────────────────────────────────
@@ -383,11 +383,11 @@ class Averbacao(Base):
     banco: Mapped[str] = mapped_column(String(100), nullable=False)
     numero_operacao: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(Enum(StatusAverbacao, name="status_averbacao"), default=StatusAverbacao.PENDENTE)
-    data_averbacao: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    data_averbacao: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resposta_banco: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     observacao: Mapped[str | None] = mapped_column(Text, nullable=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
-    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     proposta = relationship("Proposta")
 
@@ -412,8 +412,8 @@ class RetornoBanco(Base):
     dados: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     processado: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     observacao: Mapped[str | None] = mapped_column(Text, nullable=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
-    processado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    processado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     proposta = relationship("Proposta")
 
@@ -436,11 +436,11 @@ class Pendencia(Base):
     tipo: Mapped[str] = mapped_column(Enum(TipoPendencia, name="tipo_pendencia"), nullable=False)
     descricao: Mapped[str] = mapped_column(Text, nullable=False)
     responsavel_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("usuarios.id"), nullable=True)
-    prazo: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    prazo: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolvida: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     resolucao: Mapped[str | None] = mapped_column(Text, nullable=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
-    resolvida_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    resolvida_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     proposta = relationship("Proposta")
     responsavel = relationship("Usuario")
@@ -463,7 +463,7 @@ class LogAcesso(Base):
     ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     status_code: Mapped[int] = mapped_column(Integer, nullable=False)
     duracao_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
 # ── Auditoria de Ações de Usuários ───────────────────────────────────────────
@@ -520,7 +520,7 @@ class LogAuditoria(Base):
     sucesso: Mapped[bool]      = mapped_column(Boolean, nullable=False, default=True)
     erro:    Mapped[str | None] = mapped_column(Text,   nullable=True)
 
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
 # ── Convênio (catálogo de convênios reconhecidos) ────────────────────────────
@@ -534,7 +534,7 @@ class Convenio(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     # True quando foi registrado automaticamente pelo motor (não pela equipe)
     auto_registrado: Mapped[bool] = mapped_column(Boolean, default=False)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 # ── Cache Titan (TTL controlado pela app) ────────────────────────────────────
@@ -544,5 +544,5 @@ class TitanCache(Base):
 
     endpoint: Mapped[str] = mapped_column(String(200), primary_key=True)
     dados: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    cached_em: Mapped[datetime] = mapped_column(DateTime, default=_now)
-    expira_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    cached_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expira_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

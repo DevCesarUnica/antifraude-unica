@@ -2,7 +2,7 @@
 Router de averbações — registro formal de propostas no banco/convênio.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -53,7 +53,7 @@ def atualizar_averbacao(averbacao_id: str, body: AverbacaoUpdate, db: Session = 
     for campo, valor in body.model_dump(exclude_none=True).items():
         setattr(av, campo, valor)
     if body.status == StatusAverbacao.AVERBADO and not av.data_averbacao:
-        av.data_averbacao = datetime.utcnow()
+        av.data_averbacao = datetime.now(timezone.utc)
     db.commit()
     db.refresh(av)
     return av
@@ -63,7 +63,7 @@ def atualizar_averbacao(averbacao_id: str, body: AverbacaoUpdate, db: Session = 
 def confirmar_averbacao(averbacao_id: str, numero_operacao: str | None = None, db: Session = Depends(get_db)):
     av = _get_ou_404(db, averbacao_id)
     av.status = StatusAverbacao.AVERBADO
-    av.data_averbacao = datetime.utcnow()
+    av.data_averbacao = datetime.now(timezone.utc)
     if numero_operacao:
         av.numero_operacao = numero_operacao
     db.commit()

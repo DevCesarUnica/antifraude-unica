@@ -2,7 +2,7 @@
 Router de retornos de banco — registros de resposta dos bancos sobre propostas.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -62,7 +62,7 @@ def processar_retorno(retorno_id: str, db: Session = Depends(get_db)):
             )
 
     retorno.processado = True
-    retorno.processado_em = datetime.utcnow()
+    retorno.processado_em = datetime.now(timezone.utc)
     db.commit()
     db.refresh(retorno)
     return retorno

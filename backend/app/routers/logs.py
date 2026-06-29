@@ -4,11 +4,14 @@ Router de logs — acesso HTTP e auditoria completa de ações de usuários.
 
 import io
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, extract
+from sqlalchemy import func, extract, or_
 from sqlalchemy.orm import Session
+
+BRT = ZoneInfo("America/Sao_Paulo")
 
 from app.database import get_db
 from app.models import LogAcesso, LogAuditoria, Usuario
@@ -70,7 +73,7 @@ def listar_logs(
 
 @router.get("/acesso/resumo")
 def resumo_logs(db: Session = Depends(get_db)):
-    corte = datetime.utcnow() - timedelta(hours=24)
+    corte = datetime.now(timezone.utc) - timedelta(hours=24)
     resultados = (
         db.query(LogAcesso.status_code, func.count(LogAcesso.id).label("total"))
         .filter(LogAcesso.timestamp >= corte)
@@ -198,7 +201,7 @@ def exportar_auditoria_excel(
     # Linha de título
     ws.merge_cells("A1:O1")
     titulo = ws["A1"]
-    titulo.value = f"Auditoria de Ações — exportado em {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    titulo.value = f"Auditoria de Ações — exportado em {datetime.now(timezone.utc).astimezone(BRT).strftime('%d/%m/%Y %H:%M')} (Horário de Brasília)"
     titulo.font = Font(name="Calibri", bold=True, size=13, color="FFFFFF")
     titulo.fill = PatternFill("solid", fgColor=COR_HEADER)
     titulo.alignment = Alignment(horizontal="center", vertical="center")
@@ -215,7 +218,7 @@ def exportar_auditoria_excel(
 
     # Dados
     for row_idx, r in enumerate(registros, start=3):
-        data_hora = r.criado_em.strftime("%d/%m/%Y %H:%M:%S") if r.criado_em else ""
+        data_hora = r.criado_em.astimezone(BRT).strftime("%d/%m/%Y %H:%M:%S") if r.criado_em else ""
         valores = [
             data_hora,
             r.nome or "",
@@ -269,7 +272,7 @@ def exportar_auditoria_excel(
     wb.save(buffer)
     buffer.seek(0)
 
-    nome_arquivo = f"auditoria_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    nome_arquivo = f"auditoria_{datetime.now(timezone.utc).astimezone(BRT).strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -282,7 +285,7 @@ def resumo_auditoria(
     db: Session = Depends(get_db),
     _: Usuario = Depends(verificar_token),
 ):
-    corte = datetime.utcnow() - timedelta(hours=24)
+    corte = datetime.now(timezone.utc) - timedelta(hours=24)
     total = db.query(func.count(LogAuditoria.id)).filter(LogAuditoria.criado_em >= corte).scalar() or 0
     alto_risco = db.query(func.count(LogAuditoria.id)).filter(
         LogAuditoria.criado_em >= corte, LogAuditoria.risco == "ALTO"
@@ -314,8 +317,8 @@ def logs_suspeitos(
     - Múltiplos logins falhados do mesmo IP em 1h (≥3)
     - Ações de risco médio/alto fora do horário comercial (antes 10h UTC = antes 7h BRT)
     """
-    corte_24h = datetime.utcnow() - timedelta(hours=24)
-    corte_1h = datetime.utcnow() - timedelta(hours=1)
+    corte_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+    corte_1h = datetime.now(timezone.utc) - timedelta(hours=1)
     suspeitos = []
 
     # 1. Concentração de alto risco por usuário em 1h
@@ -361,30 +364,31 @@ def logs_suspeitos(
             "ip": r.ip,
         })
 
-    # 3. Ações de risco médio/alto fora do horário comercial
-    # Antes das 10h UTC = antes das 7h BRT (horário de Brasília = UTC-3)
+    # 3. Ações de risco médio/alto fora do horário comercial (07h–22h BRT)
+    hora_brt = extract("hour", func.timezone("America/Sao_Paulo", LogAuditoria.criado_em))
     fora_horario = (
         db.query(LogAuditoria)
         .filter(
             LogAuditoria.criado_em >= corte_24h,
             LogAuditoria.risco.in_(["MEDIO", "ALTO"]),
-            extract("hour", LogAuditoria.criado_em) < 10,
+            or_(hora_brt < 7, hora_brt >= 22),
         )
         .order_by(LogAuditoria.criado_em.desc())
         .limit(10)
         .all()
     )
     for r in fora_horario:
+        criado_brt = r.criado_em.astimezone(BRT).strftime("%d/%m/%Y %H:%M:%S")
         suspeitos.append({
             "tipo": "fora_horario",
             "nivel": "MEDIO",
-            "descricao": f"{r.nome or r.username or 'Sistema'} realizou '{r.acao}' fora do horário comercial",
+            "descricao": f"{r.nome or r.username or 'Sistema'} realizou '{r.acao}' fora do horário comercial ({criado_brt} BRT)",
             "log_id": r.id,
             "usuario_id": r.usuario_id,
             "username": r.username,
             "nome": r.nome,
             "acao": r.acao,
-            "criado_em": r.criado_em.isoformat(),
+            "criado_em": r.criado_em.astimezone(BRT).isoformat(),
         })
 
     return {"suspeitos": suspeitos, "total": len(suspeitos)}

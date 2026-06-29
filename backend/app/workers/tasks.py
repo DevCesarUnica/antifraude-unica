@@ -17,7 +17,7 @@ Dead Letter Queue (DLQ):
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from celery import shared_task
 from celery.utils.log import get_task_logger
@@ -233,7 +233,7 @@ def varredura_pendentes():
     """
     db = SessionLocal()
     try:
-        agora = datetime.utcnow()
+        agora = datetime.now(timezone.utc)
         limite_enfileirada = agora - timedelta(minutes=5)
         limite_analise = agora - timedelta(minutes=10)
 

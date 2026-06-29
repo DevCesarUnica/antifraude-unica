@@ -2,7 +2,7 @@
 Router de pendências — painel de pendências operacionais.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -55,7 +55,7 @@ def atualizar_pendencia(pendencia_id: str, body: PendenciaUpdate, db: Session = 
     for campo, valor in body.model_dump(exclude_none=True).items():
         setattr(p, campo, valor)
     if body.resolvida and not p.resolvida_em:
-        p.resolvida_em = datetime.utcnow()
+        p.resolvida_em = datetime.now(timezone.utc)
     db.commit()
     db.refresh(p)
     return p
@@ -65,7 +65,7 @@ def atualizar_pendencia(pendencia_id: str, body: PendenciaUpdate, db: Session = 
 def resolver_pendencia(pendencia_id: str, resolucao: str | None = None, db: Session = Depends(get_db)):
     p = _get_ou_404(db, pendencia_id)
     p.resolvida = True
-    p.resolvida_em = datetime.utcnow()
+    p.resolvida_em = datetime.now(timezone.utc)
     if resolucao:
         p.resolucao = resolucao
     db.commit()

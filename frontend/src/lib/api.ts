@@ -225,6 +225,14 @@ export const getStormAcompanhamentoContrato = (ff: string) =>
 export const getCorretores = (params?: { nome?: string; cpf?: string; grupo_id?: string; ativo?: boolean }) =>
   api.get("/corretores/", { params }).then((r) => r.data);
 
+export const getCorretoresUnificados = (params?: {
+  pagina?: number;
+  nome?: string;
+  codigo?: string;
+  status?: string;
+  origem?: string;
+}) => api.get("/corretores/unificados", { params }).then((r) => r.data);
+
 export const criarCorretor = (data: unknown) =>
   api.post("/corretores/", data).then((r) => r.data);
 

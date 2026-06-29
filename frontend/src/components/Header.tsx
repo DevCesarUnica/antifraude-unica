@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import logo from "../logo.png";
+import BuscarContratoModal from "./BuscarContratoModal";
 
 // ── Estrutura de navegação agrupada ──────────────────────────────────────────
 
@@ -184,6 +185,7 @@ export default function Header() {
   const navigate = useNavigate();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [buscaAberta, setBuscaAberta]   = useState(false);
   const [tema, setTema] = useState<"dark" | "light">(() =>
     (localStorage.getItem("tema") as "dark" | "light") ?? "dark"
   );
@@ -213,6 +215,18 @@ export default function Header() {
 
   // Fecha menu mobile ao navegar
   useEffect(() => { setMobileMenuOpen(false); }, [location.pathname]);
+
+  // Ctrl+K abre busca global
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setBuscaAberta(true);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
 
   const sair = () => {
     localStorage.removeItem("token");
@@ -285,6 +299,41 @@ export default function Header() {
 
           {/* Ações direita */}
           <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Busca global */}
+            <button
+              onClick={() => setBuscaAberta(true)}
+              title="Buscar contrato (Ctrl+K)"
+              className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-all duration-150"
+              style={{
+                backgroundColor: "var(--bg-mid)",
+                color: "var(--text-muted)",
+                border: "1px solid var(--border)",
+                minWidth: 160,
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "#8B5CF6"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"; }}
+            >
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+              </svg>
+              <span className="flex-1 text-left">Buscar contrato...</span>
+              <kbd className="hidden lg:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: "var(--bg-card)" }}>
+                Ctrl+K
+              </kbd>
+            </button>
+
+            {/* Botão compacto mobile */}
+            <button
+              onClick={() => setBuscaAberta(true)}
+              title="Buscar contrato"
+              className="sm:hidden flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150"
+              style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)" }}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+              </svg>
+            </button>
+
             {/* Tema */}
             <button
               onClick={() => setTema((t) => (t === "dark" ? "light" : "dark"))}
@@ -406,6 +455,8 @@ export default function Header() {
           </div>
         </div>
       </header>
+
+      {buscaAberta && <BuscarContratoModal onClose={() => setBuscaAberta(false)} />}
     </>
   );
 }

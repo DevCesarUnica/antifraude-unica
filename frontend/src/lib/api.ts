@@ -448,4 +448,9 @@ export const importarBlacklist = (file: File) => {
   return api.post("/blacklist/import", fd).then((r) => r.data);
 };
 
+// ── Busca Global ──────────────────────────────────────────────────────────────
+
+export const buscarContrato = (numero: string) =>
+  api.get("/buscar/contrato", { params: { numero } }).then((r) => r.data);
+
 export default api;

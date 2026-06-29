@@ -30,6 +30,7 @@ export default defineConfig({
       "/logs": "http://localhost:8000",
       "/relatorios": "http://localhost:8000",
       "/blacklist": "http://localhost:8000",
+      "/buscar": "http://localhost:8000",
       "/health": "http://localhost:8000",
     },
   },

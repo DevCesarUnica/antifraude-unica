@@ -215,7 +215,6 @@ async def enviar_para_titan(
     headers = {
         "Content-Type":      "application/json",
         "Titan-Api-Key":     api_key,
-        "Authorization":     f"Bearer {api_key}",
         "X-Idempotency-Key": idempotency_key,
     }
 
@@ -232,7 +231,7 @@ async def enviar_para_titan(
         try:
             async with httpx.AsyncClient(timeout=float(timeout_seconds)) as client:
                 response = await client.post(
-                    f"{base_url}/api/operations/create",
+                    f"{base_url}/operations/create",
                     headers=headers,
                     json=payload,
                 )

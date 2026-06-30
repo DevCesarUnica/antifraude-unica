@@ -1,6 +1,7 @@
 ================================================================================
   ANTIFRAUDE UNICA PROMOTORA — GUIA DE INSTALAÇÃO E CONFIGURAÇÃO
   Como clonar e rodar o projeto do zero no VS Code
+  Última atualização: 30/06/2026 (v2.5)
 ================================================================================
 
 
@@ -9,12 +10,13 @@
 ================================================================================
 
 Antes de qualquer coisa, verificar se os programas abaixo estão instalados.
-Abrir o Terminal do VS Code (Ctrl + ') e testar cada comando:
+Abrir o Terminal do VS Code (Ctrl + `) e testar cada comando:
 
-    git --version        → Deve aparecer: git version 2.x
-    python --version     → Deve aparecer: Python 3.10 ou superior
-    node --version       → Deve aparecer: v18 ou superior
-    npm --version        → Deve aparecer: 9 ou superior
+    git --version         → Deve aparecer: git version 2.x
+    python --version      → Deve aparecer: Python 3.11 ou superior
+    node --version        → Deve aparecer: v18 ou superior
+    npm --version         → Deve aparecer: 9 ou superior
+    psql --version        → Deve aparecer: psql (PostgreSQL) 14 ou superior
 
 Se algum não funcionar, instalar:
 
@@ -22,6 +24,9 @@ Se algum não funcionar, instalar:
   - Python 3.11:  https://www.python.org/downloads/
                   IMPORTANTE: marcar "Add Python to PATH" durante a instalação
   - Node.js 20:   https://nodejs.org/  (baixar a versão LTS)
+  - PostgreSQL 16: https://www.postgresql.org/download/
+                  Durante a instalação, anotar a senha do usuário "postgres"
+                  Porta padrão: 5432
 
 Após instalar, fechar e reabrir o VS Code antes de continuar.
 
@@ -48,10 +53,29 @@ Em seguida abrir a pasta no VS Code:
 
 
 ================================================================================
-  PASSO 2 — CRIAR AMBIENTE VIRTUAL PYTHON
+  PASSO 2 — CRIAR O BANCO DE DADOS POSTGRESQL
 ================================================================================
 
-No terminal do VS Code (Ctrl + '), digitar:
+O sistema usa PostgreSQL em TODOS os ambientes (não usa SQLite).
+
+Abrir o terminal e criar o banco:
+
+    psql -U postgres -c "CREATE DATABASE antifraude;"
+    psql -U postgres -c "CREATE USER unica WITH PASSWORD 'unica123';"
+    psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE antifraude TO unica;"
+
+Ou usando o pgAdmin (interface gráfica do PostgreSQL):
+  1. Expandir "Databases" → clicar com botão direito → "Create" → "Database"
+  2. Name: antifraude → clicar Save
+
+  ATENÇÃO: Se o banco antifraude não existir, o seed.py vai falhar.
+
+
+================================================================================
+  PASSO 3 — CRIAR AMBIENTE VIRTUAL PYTHON
+================================================================================
+
+No terminal do VS Code (Ctrl + `), digitar:
 
     cd backend
     python -m venv venv
@@ -72,7 +96,7 @@ O terminal vai mostrar (venv) no início da linha — isso confirma que está at
 
 
 ================================================================================
-  PASSO 3 — INSTALAR DEPENDÊNCIAS DO BACKEND
+  PASSO 4 — INSTALAR DEPENDÊNCIAS DO BACKEND
 ================================================================================
 
 Com o (venv) ativo e dentro da pasta backend, rodar:
@@ -87,14 +111,37 @@ Se aparecer erro de permissão no Windows, tentar:
 
 
 ================================================================================
-  PASSO 4 — POPULAR O BANCO DE DADOS
+  PASSO 5 — CONFIGURAR VARIÁVEIS DE AMBIENTE
+================================================================================
+
+Criar o arquivo backend/.env com o seguinte conteúdo:
+
+    DATABASE_URL=postgresql://unica:unica123@localhost:5432/antifraude
+    SECRET_KEY=minha-chave-secreta-local-qualquer-coisa
+    JWT_ALGORITHM=HS256
+    JWT_EXPIRATION_HOURS=8
+
+    # Integração Hope/Titan (opcional se não for usar)
+    TITAN_API_KEY=sua_chave_titan_aqui
+
+    # Integração Storm (opcional se não for usar)
+    STORM_USERNAME=seu_usuario_storm
+    STORM_PASSWORD=sua_senha_storm
+    STORM_CLIENT_ID=seu_client_id_storm
+
+  DICA: Para funcionar só no ambiente local (sem as integrações externas),
+  basta ter DATABASE_URL e SECRET_KEY preenchidos.
+
+
+================================================================================
+  PASSO 6 — POPULAR O BANCO DE DADOS
 ================================================================================
 
 Ainda dentro da pasta backend, com o (venv) ativo:
 
     python seed.py
 
-O script vai criar o banco de dados e inserir todos os dados iniciais.
+O script vai criar todas as tabelas e inserir os dados iniciais.
 Deve aparecer no final:
 
     Inserindo usuários...
@@ -107,10 +154,11 @@ Deve aparecer no final:
 
   ATENÇÃO: Se aparecer algum erro aqui, NÃO continuar os próximos passos.
   O sistema não vai funcionar sem o banco populado corretamente.
+  Erros comuns: banco não existe (ver Passo 2) ou .env incorreto (ver Passo 5).
 
 
 ================================================================================
-  PASSO 5 — INICIAR O BACKEND
+  PASSO 7 — INICIAR O BACKEND
 ================================================================================
 
 Com o (venv) ativo e dentro da pasta backend:
@@ -125,9 +173,12 @@ Aguardar aparecer:
   IMPORTANTE: Deixar esse terminal aberto. Não fechar enquanto usar o sistema.
   Para parar o servidor quando terminar: pressionar Ctrl + C
 
+  DOCUMENTAÇÃO INTERATIVA: http://localhost:8000/docs (Swagger UI)
+  Permite testar todos os endpoints da API pelo navegador.
+
 
 ================================================================================
-  PASSO 6 — INSTALAR E INICIAR O FRONTEND
+  PASSO 8 — INSTALAR E INICIAR O FRONTEND
 ================================================================================
 
 Abrir um SEGUNDO terminal no VS Code (clicar no + na barra de terminais).
@@ -144,17 +195,17 @@ Em seguida:
 Aguardar aparecer:
 
     VITE v5.x.x  ready in xxx ms
-    ➜  Local:   http://localhost:5173/
+    ➜  Local:   http://localhost:3000/
 
   IMPORTANTE: Deixar esse terminal aberto também.
   Para parar quando terminar: pressionar Ctrl + C
 
 
 ================================================================================
-  PASSO 7 — ACESSAR O SISTEMA
+  PASSO 9 — ACESSAR O SISTEMA
 ================================================================================
 
-Abrir o navegador e acessar:  http://localhost:5173
+Abrir o navegador e acessar:  http://localhost:3000
 
 Usuários disponíveis para login:
 
@@ -172,6 +223,29 @@ Usuários disponíveis para login:
     - ANALISTA: aprova/reprova propostas
     - OPERADOR: apenas visualiza e altera status de propostas
 
+  BUSCA RÁPIDA: Pressionar Ctrl+K em qualquer tela para abrir o buscador
+    global de contratos (por ADE, CPF ou nome do cliente).
+
+
+================================================================================
+  SINCRONIA COM BANCOS PARCEIROS (OPCIONAL)
+================================================================================
+
+Para importar contratos das integrações externas:
+
+  IMPORTAR PROPOSTAS DO HOPE (Titan):
+    Acessar: http://localhost:8000/docs
+    Endpoint: POST /titan/sync
+    Body (JSON): { "max_pages": 50 }
+    Retorna: { "importadas": N, "ignoradas": N, "erros": N }
+
+  IMPORTAR CONTRATOS DA STORM:
+    Endpoint: POST /storm/sync
+    Body (JSON): { "max_paginas": 50 }
+    Retorna: { "importadas": N, "ignoradas": N, "erros": N }
+
+  As operações de sync são idempotentes — rodar duas vezes não duplica dados.
+
 
 ================================================================================
   EXTENSÕES RECOMENDADAS DO VS CODE
@@ -184,6 +258,7 @@ Instalar pelo menu de extensões (Ctrl + Shift + X):
   - ES7+ React/Redux/React-Native snippets — atalhos para React
   - Prettier - Code formatter           — formatação automática
   - GitLens                             — visualizar histórico Git
+  - PostgreSQL (cweijan)                — explorador de banco de dados
 
 
 ================================================================================
@@ -199,6 +274,17 @@ PROBLEMA: "npm não é reconhecido como comando interno"
 SOLUÇÃO:  Reinstalar Node.js em https://nodejs.org/
           Reiniciar o VS Code após instalar
 
+PROBLEMA: Seed.py falhou com "could not connect to server"
+SOLUÇÃO:  O PostgreSQL não está rodando. Abrir o pgAdmin ou o Serviços
+          do Windows e iniciar o serviço "postgresql-x64-16"
+
+PROBLEMA: Seed.py falhou com "database antifraude does not exist"
+SOLUÇÃO:  Criar o banco conforme o Passo 2
+
+PROBLEMA: Seed.py falhou com "role unica does not exist"
+SOLUÇÃO:  Criar o usuário conforme o Passo 2, ou usar:
+          DATABASE_URL=postgresql://postgres:SUASENHA@localhost:5432/antifraude
+
 PROBLEMA: Seed.py falhou com erro de importação (ModuleNotFoundError)
 SOLUÇÃO:  Verificar se rodou venv\Scripts\activate antes do pip install
           Verificar se está dentro da pasta backend ao rodar o seed
@@ -209,15 +295,23 @@ SOLUÇÃO:  Verificar se o seed terminou com "Seed concluido com sucesso!"
 
 PROBLEMA: "Porta 8000 já está em uso"
 SOLUÇÃO:  Outro programa está usando essa porta
-          Fechar outros servidores ou reiniciar o computador
+          Fechar outros servidores ou matar o processo:
+            PowerShell: Get-Process -Id (Get-NetTCPConnection -LocalPort 8000).OwningProcess
 
-PROBLEMA: "Porta 5173 já está em uso"
+PROBLEMA: "Porta 3000 já está em uso"
 SOLUÇÃO:  Fechar outras instâncias do frontend
-          Ou rodar: npm run dev -- --port 5174
+          Ou rodar: npm run dev -- --port 3001
 
-PROBLEMA: Sistema abre mas não carrega dados (tela em branco)
+PROBLEMA: Sistema abre mas não carrega dados (tela em branco ou erro)
 SOLUÇÃO:  Verificar se o backend está rodando na porta 8000
-          Verificar se aparece o texto "Uvicorn running" no terminal do backend
+          Verificar se aparece "Uvicorn running" no terminal do backend
+          Abrir http://localhost:8000/health — deve retornar {"status":"ok"}
+
+PROBLEMA: Backend não detecta mudanças no código (--reload não funciona)
+SOLUÇÃO:  Acontece em pastas sincronizadas com OneDrive no Windows.
+          Matar todos os processos Python e reiniciar:
+            PowerShell: Get-Process -Name "python*" | Stop-Process -Force
+          Depois rodar o uvicorn novamente.
 
 PROBLEMA: Após git pull o sistema parou de funcionar
 SOLUÇÃO:  Parar o backend (Ctrl+C) e reiniciar
@@ -240,7 +334,29 @@ Para o sistema funcionar, precisam estar abertos simultaneamente:
     cd frontend
     npm run dev
 
-Acessar em: http://localhost:5173
+Acessar em: http://localhost:3000
+
+API + Swagger: http://localhost:8000/docs
+
+
+================================================================================
+  OPÇÃO AVANÇADA — DOCKER COMPOSE
+================================================================================
+
+Para subir TODO o ambiente com um único comando (requer Docker Desktop):
+
+    docker-compose up --build
+
+Isso sobe:
+  - PostgreSQL 16 (porta 5432)
+  - Redis 7 (porta 6379)
+  - Backend FastAPI (porta 8000)
+  - Celery Worker
+  - Flower — dashboard Celery (porta 5555)
+  - Frontend Vite (porta 3000)
+
+Para parar: docker-compose down
+Para resetar o banco: docker-compose down -v && docker-compose up --build
 
 
 ================================================================================

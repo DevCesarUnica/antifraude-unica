@@ -7,7 +7,7 @@ Idempotência via proposta_id_externo:
 """
 
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -187,6 +187,53 @@ def dashboard_propostas(
         skip=skip, limit=limit,
     )
     return {"items": items, "total": total, "skip": skip, "limit": limit}
+
+
+# ── Busca textual rápida (ADE, CPF, nome) ────────────────────────────────────
+
+@router.get("/search")
+def search_propostas(
+    q: str = Query(..., min_length=2, description="ADE, CPF ou nome do cliente"),
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """
+    Busca rápida por ADE, CPF ou nome. Retorna no formato PropostaDashboardItem
+    para uso em autocomplete e consultas da mesa de crédito.
+    Resultados ordenados por data de importação decrescente, sem duplicatas.
+    """
+    import re
+    from sqlalchemy import or_
+    from sqlalchemy.orm import joinedload
+    from app.services.propostas_dashboard import normalizar_proposta
+
+    q_clean = q.strip()
+    digits  = re.sub(r"\D", "", q_clean)
+
+    conditions: list = [
+        Proposta.proposta_id_externo.ilike(f"%{q_clean}%"),
+        Proposta.nome_cliente.ilike(f"%{q_clean}%"),
+    ]
+    if len(digits) >= 3:
+        conditions.append(Proposta.cpf_cliente.like(f"%{digits}%"))
+
+    rows = (
+        db.query(Proposta)
+        .options(joinedload(Proposta.corretor))
+        .filter(or_(*conditions))
+        .order_by(Proposta.criado_em.desc())
+        .limit(min(limit, 100))
+        .all()
+    )
+
+    seen: set[str] = set()
+    items: list[dict] = []
+    for p in rows:
+        if p.proposta_id_externo not in seen:
+            seen.add(p.proposta_id_externo)
+            items.append(normalizar_proposta(p))
+
+    return {"query": q_clean, "total": len(items), "items": items}
 
 
 # ── Individual ────────────────────────────────────────────────────────────────

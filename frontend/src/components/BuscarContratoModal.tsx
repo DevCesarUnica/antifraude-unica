@@ -236,7 +236,7 @@ export default function BuscarContratoModal({ onClose }: Props) {
   }, [onClose]);
 
   const buscar = useCallback(async (numero: string) => {
-    if (!numero.trim() || numero.trim().length < 3) {
+    if (!numero.trim() || numero.trim().length < 2) {
       setResultado(null);
       setErro(null);
       return;
@@ -257,7 +257,7 @@ export default function BuscarContratoModal({ onClose }: Props) {
   const onInput = (v: string) => {
     setQuery(v);
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => buscar(v), 500);
+    timerRef.current = setTimeout(() => buscar(v), 300);
   };
 
   const totalEncontrados = resultado?.total_encontrados ?? 0;
@@ -295,7 +295,7 @@ export default function BuscarContratoModal({ onClose }: Props) {
             type="text"
             value={query}
             onChange={(e) => onInput(e.target.value)}
-            placeholder="Digite o número do contrato... ex: 76525 ou FF-29/06/2026-1"
+            placeholder="Buscar por ADE, CPF ou nome... ex: 76525, 123.456.789-00, João Silva"
             className="flex-1 bg-transparent text-sm outline-none"
             style={{ color: "var(--text-primary)" }}
             onKeyDown={(e) => { if (e.key === "Enter") buscar(query); }}
@@ -333,7 +333,7 @@ export default function BuscarContratoModal({ onClose }: Props) {
                 cor="#8B5CF6"
                 badge={<BadgeHope />}
                 exemplo="76525"
-                desc="ID numérico — busca direta no Hope/Titan"
+                desc="ID numérico — busca direta no Hope/Titan (prioridade)"
                 prioridade
               />
               <FormatDica
@@ -345,8 +345,14 @@ export default function BuscarContratoModal({ onClose }: Props) {
               <FormatDica
                 cor="#22C55E"
                 badge={<BadgeLocal />}
-                exemplo="titan-76525 · storm-FF-..."
-                desc="ID externo — busca no banco de dados local"
+                exemplo="123.456.789-00"
+                desc="CPF do cliente — busca no banco local"
+              />
+              <FormatDica
+                cor="#22C55E"
+                badge={<BadgeLocal />}
+                exemplo="João Silva · titan-76525"
+                desc="Nome ou ADE — busca por texto no banco local"
               />
             </div>
           </div>

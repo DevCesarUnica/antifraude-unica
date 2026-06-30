@@ -2,8 +2,8 @@
   SISTEMA ANTIFRAUDE - UNICA PROMOTORA
   HIERARQUIA DE USUÁRIOS E PERMISSÕES
 ================================================================================
-  Última atualização: 26/06/2026
-  Versão do sistema : 2.3
+  Última atualização: 30/06/2026
+  Versão do sistema : 2.5
 ================================================================================
 
 
@@ -37,15 +37,16 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
       ✅ Criar novos usuários (com qualquer perfil)
       ✅ Editar dados de qualquer usuário (nome, email, senha, perfil)
       ✅ Ativar ou desativar qualquer usuário
+      ✅ Remover permanentemente usuários (/usuarios/{id}/excluir)
       ✅ Visualizar a lista completa de usuários
       ⛔ Não pode desativar a si mesmo
 
     PROPOSTAS:
-      ✅ Visualizar todas as propostas
-      ✅ Alterar o status de qualquer proposta
+      ✅ Visualizar todas as propostas e detalhes de auditoria
       ✅ Aprovar propostas (status → APROVADA)
-      ✅ Reprovar propostas (status → REPROVADA)
-      ✅ Mover para qualquer outro status disponível
+      ✅ Bloquear propostas (status → BLOQUEADA)
+      ✅ Reprocessar propostas (ERRO|BLOQUEADA → ENFILEIRADA)
+      ✅ Reprocessar TODAS as aprovadas (POST /propostas/reprocessar-aprovadas)
 
   Usuário padrão do sistema:
     Login : admin
@@ -70,11 +71,11 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
       ❌ Não pode ativar ou desativar usuários
 
     PROPOSTAS:
-      ✅ Visualizar todas as propostas
-      ✅ Alterar o status de qualquer proposta
+      ✅ Visualizar todas as propostas e detalhes de auditoria
       ✅ Aprovar propostas (status → APROVADA)
-      ✅ Reprovar propostas (status → REPROVADA)
-      ✅ Mover para qualquer outro status disponível
+      ✅ Bloquear propostas (status → BLOQUEADA)
+      ✅ Reprocessar propostas (ERRO|BLOQUEADA → ENFILEIRADA)
+      ✅ Reprocessar TODAS as aprovadas (POST /propostas/reprocessar-aprovadas)
 
   Usuário padrão do sistema:
     Login : cesar
@@ -87,7 +88,7 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
 
   Quem é:
     Responsável pela análise detalhada das propostas. Pode tomar decisões
-    de aprovação e reprovação, mas não tem acesso à gestão da equipe.
+    de aprovação e bloqueio, mas não tem acesso à gestão da equipe.
 
   O que pode fazer:
 
@@ -98,10 +99,10 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
 
     PROPOSTAS:
       ✅ Visualizar todas as propostas
-      ✅ Alterar o status de qualquer proposta
       ✅ Aprovar propostas (status → APROVADA)
-      ✅ Reprovar propostas (status → REPROVADA)
-      ✅ Mover para qualquer outro status disponível
+      ✅ Bloquear propostas (status → BLOQUEADA)
+      ✅ Reprocessar propostas (ERRO|BLOQUEADA → ENFILEIRADA)
+      ❌ Não pode usar /propostas/reprocessar-aprovadas (restrito a admin/gestor)
 
   Usuários padrão do sistema:
     Login : leo    / Senha : leo123
@@ -115,7 +116,7 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
   Quem é:
     Nível de entrada. Realiza operações básicas de triagem e
     movimentação de propostas, mas não pode tomar decisões finais
-    de aprovação ou reprovação.
+    de aprovação ou bloqueio.
 
   O que pode fazer:
 
@@ -125,11 +126,12 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
       ❌ O menu "Gestão de Usuários" não aparece para este perfil
 
     PROPOSTAS:
-      ✅ Visualizar todas as propostas
-      ✅ Alterar status (ANALISAR, PENDENTE, AGENDADA, AGUARDANDO_BANCO, etc.)
+      ✅ Visualizar todas as propostas e detalhes
+      ✅ Busca global de contratos (Ctrl+K)
       ❌ NÃO pode aprovar propostas (status → APROVADA)
-      ❌ NÃO pode reprovar propostas (status → REPROVADA)
-          → Tentativa de aprovação/reprovação retorna erro 403
+      ❌ NÃO pode bloquear propostas (status → BLOQUEADA)
+      ❌ NÃO pode reprocessar propostas
+          → Tentativa retorna erro 403 Forbidden
 
   Usuário padrão do sistema:
     Login : sergio
@@ -140,17 +142,20 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
   TABELA RESUMO DE PERMISSÕES
 ================================================================================
 
-  AÇÃO                              ADMIN   GESTOR  ANALISTA  OPERADOR
-  ─────────────────────────────────────────────────────────────────────
-  Criar usuário                       ✅      ❌       ❌        ❌
-  Editar usuário                      ✅      ❌       ❌        ❌
-  Ativar / Desativar usuário          ✅      ❌       ❌        ❌
-  Visualizar lista de usuários        ✅      ✅       ❌        ❌
-  ─────────────────────────────────────────────────────────────────────
-  Visualizar propostas                ✅      ✅       ✅        ✅
-  Alterar status da proposta          ✅      ✅       ✅        ✅
-  Aprovar proposta (→ APROVADA)       ✅      ✅       ✅        ❌
-  Reprovar proposta (→ REPROVADA)     ✅      ✅       ✅        ❌
+  AÇÃO                                ADMIN   GESTOR  ANALISTA  OPERADOR
+  ───────────────────────────────────────────────────────────────────────
+  Criar usuário                         ✅      ❌       ❌        ❌
+  Editar usuário                        ✅      ❌       ❌        ❌
+  Ativar / Desativar usuário            ✅      ❌       ❌        ❌
+  Remover usuário permanentemente       ✅      ❌       ❌        ❌
+  Visualizar lista de usuários          ✅      ✅       ❌        ❌
+  ───────────────────────────────────────────────────────────────────────
+  Visualizar propostas                  ✅      ✅       ✅        ✅
+  Busca global (Ctrl+K)                 ✅      ✅       ✅        ✅
+  Aprovar proposta (→ APROVADA)         ✅      ✅       ✅        ❌
+  Bloquear proposta (→ BLOQUEADA)       ✅      ✅       ✅        ❌
+  Reprocessar proposta                  ✅      ✅       ✅        ❌
+  Reprocessar TODAS as aprovadas        ✅      ✅       ❌        ❌
 
 
 ================================================================================
@@ -158,20 +163,22 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
 ================================================================================
 
   BACKEND (API — proteção real):
-    - GET  /usuarios/              → exige role ADMIN ou GESTOR
-    - POST /usuarios/              → exige role ADMIN
-    - PATCH /usuarios/{id}         → exige role ADMIN
-    - DELETE /usuarios/{id}        → exige role ADMIN (desativa)
-    - DELETE /usuarios/{id}/excluir → exige role ADMIN (remove permanente)
-    - POST /propostas/{id}/aprovar  → disponível para ADMIN, GESTOR, ANALISTA
-    - POST /propostas/{id}/bloquear → disponível para ADMIN, GESTOR, ANALISTA
+    - GET  /usuarios/                  → exige perfil ADMIN ou GESTOR
+    - POST /usuarios/                  → exige perfil ADMIN
+    - PATCH /usuarios/{id}             → exige perfil ADMIN
+    - DELETE /usuarios/{id}            → exige perfil ADMIN (desativa)
+    - DELETE /usuarios/{id}/excluir    → exige perfil ADMIN (remove permanente)
+    - POST /propostas/{id}/aprovar     → ADMIN, GESTOR, ANALISTA
+    - POST /propostas/{id}/bloquear    → ADMIN, GESTOR, ANALISTA
+    - POST /propostas/{id}/reprocessar → ADMIN, GESTOR, ANALISTA
+    - POST /propostas/reprocessar-aprovadas → ADMIN, GESTOR
 
   FRONTEND (interface — proteção visual):
     - Menu "Usuários" visível apenas para ADMIN e GESTOR
     - Botão "+ Novo Usuário" visível apenas para ADMIN
     - Botões de editar e ativar/desativar visíveis apenas para ADMIN
-    - Modal da Mesa de Crédito (DashboardPropostasTable): botões Aprovar/Bloquear
-      aparecem conforme o status da proposta (não por perfil — protegido no backend)
+    - Modal da Mesa de Crédito: botões Aprovar/Bloquear/Reprocessar
+      aparecem conforme o status da proposta E o perfil do usuário.
 
   NOTA: A proteção real do sistema está sempre no backend. A proteção
   visual do frontend é apenas para melhorar a experiência do usuário.
@@ -186,9 +193,9 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
   Somente o perfil ADMIN pode criar usuários. Siga os passos:
 
   1. Faça login com uma conta ADMIN (ex: admin / admin123)
-  2. Clique no avatar (círculo vermelho com inicial) no canto superior direito
+  2. Clique no avatar (círculo com inicial) no canto superior direito
   3. Clique em "Gestão de Usuários" no menu que aparecer
-  4. Clique no botão "+ Novo Usuário" (vermelho, canto superior direito)
+  4. Clique no botão "+ Novo Usuário" (canto superior direito)
   5. Preencha o formulário:
        - Nome completo  : nome de exibição do usuário
        - Usuário (login): identificador único para login (sem espaços)
@@ -200,6 +207,17 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
   O usuário criado poderá fazer login imediatamente com o username
   e a senha definidos no cadastro.
 
+  ALTERNATIVA VIA API:
+    POST /usuarios/
+    Authorization: Bearer {token_admin}
+    {
+      "username": "novo_usuario",
+      "email": "email@unica.com",
+      "nome": "Nome Completo",
+      "senha": "senha_inicial",
+      "perfil": "analista"
+    }
+
 
 ================================================================================
   COMO DESATIVAR UM USUÁRIO
@@ -207,7 +225,7 @@ Antifraude. Quanto maior o nível, mais ações o usuário pode realizar.
 
   1. Acesse "Gestão de Usuários" (requer ADMIN)
   2. Localize o usuário na tabela
-  3. Clique no ícone de círculo com X na coluna "Ações"
+  3. Clique no ícone de desativar na coluna "Ações"
   4. O status muda para "Inativo" e o token é invalidado imediatamente
      (se o usuário estiver logado, será desconectado na próxima requisição)
 

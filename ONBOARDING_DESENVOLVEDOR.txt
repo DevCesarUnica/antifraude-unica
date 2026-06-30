@@ -1,0 +1,1019 @@
+================================================================================
+  SISTEMA ANTIFRAUDE — UNICA PROMOTORA
+  GUIA COMPLETO PARA O PRÓXIMO DESENVOLVEDOR
+================================================================================
+  Documento: ONBOARDING_DESENVOLVEDOR.txt
+  Criado em: 30/06/2026
+  Versão do sistema: 2.1.0 (documentação v2.5)
+  Repositório: https://github.com/DevCesarUnica/antifraude-unica
+================================================================================
+
+Este documento é um handoff completo para o desenvolvedor que vai assumir
+este projeto. Parte do pressuposto que você nunca viu o código antes mas tem
+experiência com Python, React e bancos de dados relacionais.
+
+Leia do início ao fim antes de tocar em qualquer código.
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  ÍNDICE                                                                      ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  1.  O QUE É ESSE SISTEMA E PARA QUE SERVE                                  ║
+║  2.  COMO FUNCIONA NA PRÁTICA (visão do usuário final)                       ║
+║  3.  ARQUITETURA — MAPA GERAL                                                ║
+║  4.  COMO RODAR LOCALMENTE (do zero)                                         ║
+║  5.  ESTRUTURA DE PASTAS                                                      ║
+║  6.  BACKEND — COMO ESTÁ ORGANIZADO                                          ║
+║  7.  FRONTEND — COMO ESTÁ ORGANIZADO                                         ║
+║  8.  BANCO DE DADOS — TABELAS QUE IMPORTAM                                   ║
+║  9.  AUTENTICAÇÃO — COMO FUNCIONA                                             ║
+║  10. MOTOR ANTIFRAUDE — A PARTE MAIS CRÍTICA                                 ║
+║  11. SISTEMA DE BUSCA GLOBAL                                                  ║
+║  12. INTEGRAÇÃO HOPE / TITAN — COMO FUNCIONA                                 ║
+║  13. INTEGRAÇÃO STORM — COMO FUNCIONA                                        ║
+║  14. AS REGRAS QUE VOCÊ NUNCA PODE VIOLAR                                    ║
+║  15. FLUXO COMPLETO DE UMA PROPOSTA                                           ║
+║  16. STATUS DE PROPOSTAS — TODOS OS ESTADOS                                  ║
+║  17. USUÁRIOS E PERMISSÕES                                                    ║
+║  18. COMO ADICIONAR UM NOVO ENDPOINT                                          ║
+║  19. ARMADILHAS E PROBLEMAS CONHECIDOS                                        ║
+║  20. PRÓXIMOS PASSOS SUGERIDOS                                                ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+
+================================================================================
+  1. O QUE É ESSE SISTEMA E PARA QUE SERVE
+================================================================================
+
+A Unica Promotora é uma empresa de crédito consignado que opera como
+intermediária entre clientes que querem empréstimos e bancos que fornecem
+o crédito (Hope, BMG, Pan, Prefeituras municipais, etc.).
+
+O PROBLEMA que este sistema resolve:
+  Propostas de crédito chegam de múltiplos bancos via APIs externas, vindas
+  de dezenas de corretores. É impossível revisar manualmente cada uma em
+  volume. Algumas propostas têm risco de fraude: CPF na lista negra, valor
+  suspeito, convênio inválido, etc.
+
+A SOLUÇÃO:
+  Um sistema web interno para a "Mesa de Crédito" que:
+    1. Importa propostas automaticamente das APIs dos bancos (Hope e Storm).
+    2. Passa cada proposta por um motor de regras antifraude configurável.
+    3. Propostas suspeitas → BLOQUEADA (automático).
+    4. Demais → ANALISE_MANUAL (para um analista revisar).
+    5. Analista aprova ou bloqueia cada proposta manualmente.
+    6. Registro completo de auditoria de todas as decisões.
+
+QUEM USA:
+  - Analistas de crédito (revisão de propostas)
+  - Gestores (supervisão e relatórios)
+  - Administrador (configuração do sistema)
+  - Operadores (visualização e triagem inicial)
+
+O SISTEMA NÃO:
+  - Não envia o crédito ao banco (isso é feito fora do sistema por enquanto)
+  - Não cancela contratos nos bancos
+  - Não tem integração com sistemas de assinatura eletrônica
+
+
+================================================================================
+  2. COMO FUNCIONA NA PRÁTICA (visão do usuário final)
+================================================================================
+
+CENÁRIO TÍPICO DO DIA A DIA:
+
+  8h00 — Gestor faz o sync matinal:
+    → Acessa http://localhost:3000
+    → Swagger ou um botão na tela → POST /titan/sync e /storm/sync
+    → O sistema importa todos os contratos novos dos bancos parceiros
+    → Motor antifraude processa cada um automaticamente
+
+  8h10 — Dashboard mostra os KPIs:
+    → Card "ANALISAR": 47 propostas aguardando revisão humana
+    → Card "BLOQUEADAS": 3 bloqueadas automaticamente pelo motor
+    → Card "APROVADAS": 15 aprovadas ontem
+
+  8h15 — Analista abre a Mesa de Crédito:
+    → Tabela com todos os contratos filtrados por status=ANALISE_MANUAL
+    → Para cada proposta: clica em "Opções" → abre modal com todos os detalhes
+    → Vê: banco, convênio, produto, corretor, valor, CPF, nome do cliente
+    → Vê: score de fraude (0-100), motivo da análise, histórico de auditoria
+    → Clica: "Aprovar" ou "Bloquear" com confirmação
+
+  A qualquer momento — Busca rápida:
+    → Ctrl+K → digita o número do contrato, CPF ou nome do cliente
+    → Aparece resultado imediato de múltiplas fontes (Hope, Storm, banco local)
+    → Sem precisar navegar por telas
+
+TELAS DISPONÍVEIS:
+  /dashboard    → KPIs + gráfico + Mesa de Crédito (tabela operacional)
+  /propostas    → Listagem completa com filtros
+  /regras       → Configuração das regras antifraude
+  /bancos       → Status das integrações Hope e Storm
+  /storm        → Painel completo Storm (contratos, antifraude, simulações)
+  /usuarios     → Gestão de usuários (admin/gestor)
+
+
+================================================================================
+  3. ARQUITETURA — MAPA GERAL
+================================================================================
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                   USUÁRIO (navegador)                            │
+  │              http://localhost:3000                               │
+  └─────────────────────────────┬───────────────────────────────────┘
+                                │ HTTP (proxy Vite → :8000)
+  ┌─────────────────────────────▼───────────────────────────────────┐
+  │              FRONTEND — React + TypeScript + Vite                │
+  │  src/pages/   → telas                                           │
+  │  src/components/ → componentes reutilizáveis                    │
+  │  src/lib/api.ts  → todas as chamadas HTTP                       │
+  └─────────────────────────────┬───────────────────────────────────┘
+                                │ REST JSON
+  ┌─────────────────────────────▼───────────────────────────────────┐
+  │              BACKEND — FastAPI + Python                          │
+  │  app/routers/   → endpoints REST (20 routers)                   │
+  │  app/services/  → lógica de negócio                             │
+  │  app/models.py  → modelos ORM (tabelas)                         │
+  │  app/schemas.py → validação E/S (Pydantic)                      │
+  └──────┬──────────────────────┬──────────────────────┬────────────┘
+         │                      │                      │
+  ┌──────▼──────┐    ┌──────────▼──────────┐  ┌───────▼──────────┐
+  │ PostgreSQL  │    │   API Hope / Titan   │  │   API Storm      │
+  │ banco local │    │   ceoslab.app        │  │   Storm Tecnol.  │
+  │ porta 5432  │    │   banco: "HOPE"      │  │   hub multibanco │
+  └─────────────┘    └─────────────────────┘  └──────────────────┘
+
+COMPONENTES OPCIONAIS (produção):
+  Redis      → broker para filas Celery
+  Celery     → processa propostas assincronamente (em dev, roda inline)
+  Flower     → dashboard das filas Celery
+
+PROXY VITE:
+  Em desenvolvimento, o frontend (porta 3000) proxia TUDO para o backend
+  (porta 8000). Isso elimina problemas de CORS e significa que você nunca
+  usa URL absoluta no frontend — só caminhos relativos como "/propostas/".
+
+
+================================================================================
+  4. COMO RODAR LOCALMENTE (do zero)
+================================================================================
+
+  → Siga o INSTALACAO.txt passo a passo.
+
+  VERSÃO RÁPIDA (assumindo PostgreSQL já instalado):
+
+    # Terminal 1 — Backend
+    cd backend
+    python -m venv venv && venv\Scripts\activate
+    pip install -r requirements.txt
+    # Criar backend/.env com DATABASE_URL e SECRET_KEY (ver INSTALACAO.txt)
+    python seed.py
+    python -m uvicorn app.main:app --reload --port 8000
+
+    # Terminal 2 — Frontend
+    cd frontend
+    npm install
+    npm run dev
+
+    # Acessar
+    http://localhost:3000           → sistema
+    http://localhost:8000/docs      → Swagger (testar APIs)
+
+  LOGIN PADRÃO:  admin / admin123
+
+  ATENÇÃO — BANCO DE DADOS:
+    Este projeto usa PostgreSQL, NÃO SQLite. Se você ver antifraude.db
+    em algum lugar, ignore — não é usado. Configure sempre a DATABASE_URL
+    apontando para PostgreSQL.
+
+  ATENÇÃO — PORTA DO FRONTEND:
+    O frontend roda na porta 3000 (não 5173 que é o padrão do Vite).
+    Isso está configurado em frontend/vite.config.ts:
+      server: { port: 3000, ... }
+
+
+================================================================================
+  5. ESTRUTURA DE PASTAS
+================================================================================
+
+antifraude/
+│
+├── backend/app/
+│   ├── main.py           → Ponto de entrada. Registra TODOS os routers.
+│   ├── database.py       → Conexão PostgreSQL. Exporta get_db() (dependency).
+│   ├── models.py         → TODAS as tabelas do banco (SQLAlchemy).
+│   ├── schemas.py        → Validação de entrada/saída (Pydantic).
+│   ├── core/
+│   │   ├── config.py     → Lê .env. Use settings.xxx em qualquer lugar.
+│   │   └── circuit_breaker.py → Proteção contra cascata de erros externos.
+│   ├── routers/          → Um arquivo por recurso REST.
+│   │   ├── auth.py       → /auth/login, /auth/me
+│   │   ├── propostas.py  → /propostas/* (CRUD + dashboard + search)
+│   │   ├── buscar.py     → /buscar/* (busca global multi-fonte)
+│   │   ├── titan.py      → /titan/* (proxy Hope/Titan + /titan/sync)
+│   │   ├── storm.py      → /storm/* (proxy Storm + /storm/sync)
+│   │   └── [outros 14 routers: regras, usuarios, bancos, convenios,
+│   │        corretores, grupos, layouts, importacoes, averbacoes,
+│   │        retornos_banco, pendencias, logs, relatorios, blacklist]
+│   └── services/
+│       ├── antifraude.py         → Motor de regras antifraude
+│       ├── hope_adapter.py       → Converte operação Titan → PropostaCreate
+│       ├── storm_adapter.py      → Converte contrato Storm → PropostaCreate
+│       ├── propostas_dashboard.py → query_dashboard() + normalizar_proposta()
+│       ├── titan_sync.py         → Sincroniza Hope → banco local
+│       └── storm_sync.py         → Sincroniza Storm → banco local
+│
+├── frontend/src/
+│   ├── lib/
+│   │   ├── api.ts          → ÚNICA fonte de chamadas HTTP. Todas aqui.
+│   │   ├── hopeAdapter.ts  → Hope/Titan adapter (banco="HOPE" correto aqui)
+│   │   └── stormAdapter.ts → Storm adapter (banco NUNCA hardcodado)
+│   ├── components/
+│   │   ├── BuscarContratoModal.tsx → Ctrl+K busca global
+│   │   ├── DashboardPropostasTable.tsx → Mesa de Crédito
+│   │   └── PropostaDetalheModal.tsx    → Modal detalhes + aprovar/bloquear
+│   └── pages/
+│       ├── DashboardPage.tsx  → Página principal (KPIs + Mesa de Crédito)
+│       ├── StormPage.tsx      → Painel Storm (4 abas)
+│       └── [LoginPage, PropostasPage, RegrasPage, BancosPage, UsuariosPage]
+│
+├── DOCUMENTACAO_TECNICA.txt     → Referência técnica completa (v2.5)
+├── ONBOARDING_DESENVOLVEDOR.txt → Este arquivo
+├── INSTALACAO.txt               → Guia passo a passo de instalação
+├── HIERARQUIA_USUARIOS.txt      → Permissões por perfil
+├── TECNOLOGIAS.txt              → Stack completa
+└── docker-compose.yml           → Ambiente completo containerizado
+
+
+================================================================================
+  6. BACKEND — COMO ESTÁ ORGANIZADO
+================================================================================
+
+PONTO DE ENTRADA: backend/app/main.py
+  Cria o app FastAPI, registra todos os routers, configura CORS e middleware.
+  Para adicionar um novo router: importe e chame app.include_router().
+
+CONFIGURAÇÃO: backend/app/core/config.py
+  Toda configuração vem do arquivo backend/.env via pydantic-settings.
+  Em qualquer arquivo do backend: from app.core.config import settings
+  Então use: settings.database_url, settings.titan_api_key, etc.
+
+MODELOS (TABELAS): backend/app/models.py
+  Define todas as tabelas usando SQLAlchemy Mapped (estilo 2.0).
+  IDs são UUID (string de 36 chars), gerados pelo helper _uuid().
+  Todas as datas são UTC (datetime.utcnow).
+
+SCHEMAS (VALIDAÇÃO): backend/app/schemas.py
+  Pydantic v2. Defines o que entra (Create/Update) e o que sai (Out).
+  Se você precisa de um campo novo na resposta da API, adicione no schema Out.
+
+DEPENDENCY INJECTION:
+  get_db() em database.py é o padrão para obter sessão do banco:
+    def meu_endpoint(db: Session = Depends(get_db)):
+        ...
+
+  verificar_token() em auth.py é o padrão de autenticação:
+    def meu_endpoint(usuario = Depends(verificar_token)):
+        ...
+
+  Para exigir perfil específico:
+    from app.routers.auth import exigir_perfis
+    def meu_endpoint(u = Depends(exigir_perfis(["admin", "gestor"]))):
+        ...
+
+ADICIONAR UM ENDPOINT:
+  1. Criar ou usar arquivo em routers/
+  2. router = APIRouter(prefix="/meu-recurso", tags=["Meu Recurso"])
+  3. Definir a função com decorador @router.get/post/patch/delete
+  4. Registrar em main.py: app.include_router(meu_router.router)
+
+RODAR EM DEV VS PRODUÇÃO:
+  Em dev: motor antifraude roda inline (_processar_sync em propostas.py).
+  Em prod (Docker): Celery Worker consome da fila async.
+  Para migrar para prod, substituir _processar_sync por:
+    from app.workers.tasks import processar_proposta
+    processar_proposta.delay(proposta.id)
+
+
+================================================================================
+  7. FRONTEND — COMO ESTÁ ORGANIZADO
+================================================================================
+
+CHAMADAS HTTP: frontend/src/lib/api.ts
+  TODAS as chamadas ao backend passam por aqui.
+  Instância axios configurada com interceptors:
+    - Request: injeta Bearer token do localStorage
+    - Response: 401 (fora de storm/titan) → logout automático
+  Para adicionar nova chamada: adicione uma função aqui e exporte.
+
+ROTEAMENTO: frontend/src/App.tsx
+  React Router Dom. Para nova página: adicione Route e crie o arquivo
+  em src/pages/.
+
+ESTADO GLOBAL: TanStack React Query
+  A maioria dos dados vem via useQuery(). Isso garante cache, refetch
+  automático e loading states. Não use useState para dados do servidor.
+
+  Exemplo padrão:
+    const { data, isLoading } = useQuery({
+      queryKey: ['propostas', filtros],
+      queryFn: () => getPropostasDashboard(filtros),
+      refetchInterval: 10000  // atualiza a cada 10s
+    });
+
+COMPONENTES REUTILIZÁVEIS:
+  PropostaDetalheModal.tsx — pode ser usado em qualquer tela, recebe
+    a proposta como prop. Já inclui lógica de Aprovar/Bloquear/Reprocessar.
+  BuscarContratoModal.tsx  — modal de busca global, aberto via Ctrl+K.
+    Chamado pelo Header, não precisa ser incluído em outras telas.
+
+TEMA DARK/LIGHT:
+  Toggle no avatar (canto superior direito). Salvo em localStorage.
+  Usa variáveis CSS em index.css. Classes Tailwind "dark:" funcionam.
+
+PROXY VITE:
+  Em vite.config.ts, todas as rotas conhecidas do backend são proxiadas
+  para :8000. Se você criar um novo router no backend, adicione o prefixo
+  ao proxy em vite.config.ts para funcionar em dev.
+  Exemplo: { target: 'http://localhost:8000', changeOrigin: true }
+  O proxy cobre: /auth, /propostas, /regras, /usuarios, /bancos, /titan,
+    /storm, /convenios, /corretores, /grupos, /layouts, /importacoes,
+    /averbacoes, /retornos-banco, /pendencias, /logs, /relatorios,
+    /blacklist, /buscar, /health
+
+
+================================================================================
+  8. BANCO DE DADOS — TABELAS QUE IMPORTAM
+================================================================================
+
+AS MAIS IMPORTANTES:
+
+  propostas — coração do sistema
+    proposta_id_externo : identificador único externo (UNIQUE constraint)
+      "titan-{id}"  = veio do Hope via /titan/sync
+      "storm-{ff}"  = veio da Storm via /storm/sync
+      sem prefixo   = criada manualmente
+    status          : enum StatusProposta (veja seção 16)
+    score_fraude    : int 0-100 (calculado pelo motor)
+    resultado_motor : "BLOQUEADO" | "MANUAL"
+    decisao_detalhes: JSON com score, motivo, flags
+    payload_original: JSON completo do banco original
+
+  corretores — intermediários que trazem clientes
+    codigo_externo  : código no sistema bancário externo (UNIQUE)
+    grupo_id        : FK para grupos_corretores (nullable)
+
+  regras_antifraude — configuração do motor
+    tipo     : enum TipoRegra (BLACKLIST, VALOR_MAXIMO, etc.)
+    parametros: JSON com os parâmetros específicos de cada tipo de regra
+    bloqueante: bool — se disparar, bloqueia imediatamente sem somar score
+    peso_score: int — quanto soma ao score quando dispara
+
+  blacklist — CPFs/CNPJs/etc. bloqueados
+    tipo  : CPF | CNPJ | TELEFONE | EMAIL
+    valor : o valor do item (CPF sem máscara, etc.)
+    ativo : soft delete
+
+  auditoria_logs — histórico de eventos por proposta (append-only)
+    NUNCA deletar ou alterar registros desta tabela.
+    É a trilha de auditoria legal do sistema.
+
+IDEMPOTÊNCIA:
+  A UniqueConstraint em propostas.proposta_id_externo é a chave da
+  idempotência. Se o sync rodar duas vezes, a segunda tentativa falha
+  com IntegrityError e é ignorada (proposta já existe). Isso é
+  intencional e correto.
+
+CRIANDO MIGRAÇÕES:
+  Se você alterar models.py, crie uma migração Alembic:
+    cd backend
+    alembic revision --autogenerate -m "descricao da mudanca"
+    alembic upgrade head
+
+
+================================================================================
+  9. AUTENTICAÇÃO — COMO FUNCIONA
+================================================================================
+
+FLUXO:
+  1. POST /auth/login { identificador, senha }
+     → identificador pode ser username OU email
+     → backend valida bcrypt
+     → retorna JWT + dados do usuário
+
+  2. Frontend salva:
+     localStorage.setItem("token", jwt)
+     localStorage.setItem("usuario", JSON.stringify(user))
+
+  3. Toda requisição:
+     axios interceptor injeta: Authorization: Bearer {token}
+
+  4. Backend: verificar_token() decodifica JWT, carrega User do banco.
+     Se User.ativo = False → 401 Unauthorized (logout imediato)
+
+  5. 401 de endpoints normais → logout automático
+     401 de /storm ou /titan → HTTP 502 (não faz logout — é erro externo)
+
+EXPIRAÇÃO:
+  Padrão: 8 horas (configurável via JWT_EXPIRATION_HOURS no .env)
+  Sem refresh token — após expirar, o usuário precisa fazer login novamente.
+
+PROTEÇÃO DE ROTAS NO BACKEND:
+  Autenticação básica: Depends(verificar_token)
+  Com perfil: Depends(exigir_perfis(["admin", "gestor"]))
+
+PROTEÇÃO NO FRONTEND:
+  App.tsx verifica localStorage("token") em rotas protegidas.
+  Se ausente → redirect para /login.
+
+
+================================================================================
+  10. MOTOR ANTIFRAUDE — A PARTE MAIS CRÍTICA
+================================================================================
+
+ARQUIVO: backend/app/services/antifraude.py
+
+O motor é chamado toda vez que uma proposta entra no sistema.
+Ele avalia regras configuradas no banco de dados (tabela regras_antifraude)
+e decide o destino da proposta.
+
+REGRA ABSOLUTAMENTE INVIOLÁVEL:
+  O motor NUNCA aprova automaticamente uma proposta.
+  Toda proposta aprovada É SEMPRE uma decisão humana.
+  O motor só pode:
+    → BLOQUEADA  (score >= 80 ou regra bloqueante disparou)
+    → ANALISE_MANUAL (todos os outros casos)
+  Não existe caminho automático para APROVADA.
+
+THRESHOLDS:
+  Score 0-39  → ANALISE_MANUAL (baixo risco, mas precisa revisão)
+  Score 40-79 → ANALISE_MANUAL com aviso "risco elevado"
+  Score >= 80 → BLOQUEADA automaticamente
+  Regra bloqueante disparou → BLOQUEADA imediato (ignora score)
+
+TIPOS DE REGRA (campo "tipo" na tabela):
+  BLACKLIST      — consulta a tabela blacklist pelo CPF do cliente
+                   params: {} (não precisa de params)
+  VALOR_MAXIMO   — bloqueia se valor > limite
+                   params: { "valor_maximo": 50000.00 }
+  BANCO_CONVENIO — bloqueia combinação banco+convênio inválida
+                   params: { "combinacoes": [["HOPE","CONVENIO_X"], ...] }
+  UF_BLOQUEADA   — bloqueia se cliente for de estado bloqueado
+                   params: { "ufs": ["SP", "RJ"] }
+  SCORE_RISCO    — soma fatores de risco configuráveis ao score
+                   params: { fatores: [{campo, valor, peso}, ...] }
+  LIMITE_DIARIO  — bloqueia se corretor ultrapassaria limite diário
+                   params: { "limite_valor_diario": 100000.00 }
+
+COMO CONFIGURAR NOVAS REGRAS:
+  Via API: POST /regras/
+  Via Swagger: http://localhost:8000/docs → /regras POST
+  Ou diretamente na tela /regras do frontend.
+
+AUTO-MAPEAMENTO DE CONVÊNIOS:
+  Se uma proposta chegar com um convênio desconhecido, o motor
+  cria automaticamente na tabela convenios (auto_registrado=True).
+  Isso elimina erros de "convênio não mapeado" que bloqueavam tudo.
+
+RESULTADO SALVO NA PROPOSTA:
+  proposta.score_fraude     = int 0-100
+  proposta.resultado_motor  = "BLOQUEADO" | "MANUAL"
+  proposta.decisao_detalhes = {
+    "resultado": "BLOQUEADO",
+    "score": 85,
+    "motivo_principal": "CPF encontrado na blacklist",
+    "flags": ["regra_blacklist_disparada", ...]
+  }
+
+COMO TESTAR O MOTOR:
+  GET /propostas/{id}/debug
+  Retorna o raio-x completo da decisão antifraude de uma proposta específica.
+
+
+================================================================================
+  11. SISTEMA DE BUSCA GLOBAL
+================================================================================
+
+ARQUIVO: backend/app/routers/buscar.py
+
+O usuário pressiona Ctrl+K → modal de busca → digita qualquer coisa →
+resultado imediato de múltiplas fontes.
+
+FONTES (em ordem de prioridade):
+  1. Hope/Titan  — para IDs numéricos (ex: 76525)
+  2. Storm       — para códigos FF (ex: FF-29/06/2026-1)
+  3. Banco local — para qualquer query (ADE, CPF, nome)
+
+ENDPOINTS:
+  GET /buscar/contrato?numero=X
+    → Consulta Hope + Storm + banco local em paralelo
+    → Deduplica: se Hope retornou ID=X, remove do local todo registro
+      cujo proposta_id_externo contém X (evita aparecer 2x o mesmo)
+    → Retorna resultado de todas as fontes + quais tiveram erro
+
+  GET /buscar/propostas?q=X&limit=50
+    → Busca só no banco local, sem chamar APIs externas
+    → Ótimo para autocomplete e busca por CPF/nome
+    → Campos buscados: ADE (ILIKE), nome_cliente (ILIKE), cpf_cliente (LIKE dígitos)
+
+  GET /propostas/search?q=X
+    → Idêntico ao anterior mas retorna no formato PropostaDashboardItem
+    → Útil se precisar usar o resultado no dashboard
+
+SQL DA BUSCA LOCAL:
+  WHERE proposta_id_externo ILIKE '%q%'
+     OR nome_cliente ILIKE '%q%'
+     OR cpf_cliente LIKE '%dígitos(q)%'
+  ORDER BY criado_em DESC
+  LIMIT 20
+
+FRONTEND: components/BuscarContratoModal.tsx
+  - Debounce: 300ms (não dispara a cada tecla)
+  - Mínimo: 2 caracteres
+  - Enter: busca imediata
+  - Exibe resultados por seção (Hope, Storm, Local)
+  - Avisa quais fontes estão offline (fail-graceful)
+
+
+================================================================================
+  12. INTEGRAÇÃO HOPE / TITAN — COMO FUNCIONA
+================================================================================
+
+Hope é um banco. Titan é a plataforma tecnológica que o Hope usa (Ceoslab).
+Para nós, "Hope" e "Titan" são a mesma integração.
+
+AUTENTICAÇÃO: Bearer token (API Key)
+  Configurado via TITAN_API_KEY no .env
+  TitanService injeta o header: Authorization: Bearer {TITAN_API_KEY}
+
+BASE URL: https://hope.titan.ceoslab.app/api (configurável via TITAN_BASE_URL)
+
+PADRÃO DE ACESSO (backend):
+  from app.services.titan import TitanService
+  async with TitanService() as titan:
+      operacoes = await titan.get_operacoes(page_size=50)
+
+SYNC (importar contratos para o banco local):
+  POST /titan/sync → titan_sync.py → hope_adapter.py → cria Proposta
+  Idempotente: "titan-{id}" já existe → ignora.
+  Motor antifraude roda para cada proposta importada.
+
+ADAPTER: services/hope_adapter.py
+  Converte o formato da API Titan para PropostaCreate.
+  ATENÇÃO: banco="HOPE" é HARDCODADO AQUI. Isso é correto.
+  Este é o ÚNICO lugar no backend onde banco="HOPE" pode aparecer.
+
+ERROS:
+  TitanAuthError → HTTP 502 (credencial inválida — NÃO faz logout)
+  TitanAPIError  → HTTP 503 (serviço indisponível)
+
+CACHE: respostas Titan ficam em titan_cache (tabela no banco) por 5 minutos.
+  DELETE /titan/cache → invalida o cache manualmente.
+
+CIRCUIT BREAKER: get_breaker("titan_api")
+  Após 5 falhas seguidas → OPEN (rejeita chamadas por 60s).
+  Protege o sistema se a Titan cair.
+
+
+================================================================================
+  13. INTEGRAÇÃO STORM — COMO FUNCIONA
+================================================================================
+
+Storm Tecnologia é um HUB — uma plataforma que agrega vários bancos:
+BMG, Pan, Prefeituras municipais, e outros.
+
+AUTENTICAÇÃO: OAuth2 Resource Owner Password Grant
+  Configurado via STORM_USERNAME, STORM_PASSWORD, STORM_CLIENT_ID no .env
+  Token renovado automaticamente antes de expirar (margem de 2 min).
+
+DIFERENÇA CRÍTICA DO HOPE:
+  A Storm roteia contratos de VÁRIOS bancos diferentes.
+  O campo "banco" de cada contrato NUNCA é fixo — sempre vem do payload.
+  NUNCA hardcode banco="HOPE" ou qualquer outro valor fixo para Storm.
+  A função extrair_banco(raw) em storm_adapter.py faz essa extração.
+
+ADAPTER: services/storm_adapter.py
+  Converte o formato da API Storm para PropostaCreate.
+  proposta_id_externo = "storm-{ff}" onde ff é o código "FF" do contrato Storm.
+
+SYNC (importar contratos):
+  POST /storm/sync → storm_sync.py → storm_adapter.py → cria Proposta
+
+FRONTEND: pages/StormPage.tsx tem 4 abas:
+  ANTIFRAUDE    → contratos aguardando análise, com ações (aprovar/recusar/etc.)
+  CONTRATOS     → busca por CPF/FF, histórico
+  COLABORADORES → busca corretores Storm
+  SIMULAÇÕES    → simulador CLT/FGTS
+
+CIRCUIT BREAKER: get_breaker("storm_api")
+ERROS:
+  StormAuthError       → HTTP 502
+  StormPermissionError → HTTP 403
+  StormAPIError        → HTTP 503
+
+ESTEIRAS (categorias de contratos na Storm):
+  Valores válidos como strings exatas:
+    "Analisar/Reanalisar"
+    "Pendentes"
+    "Aprovado aguardando liberação no banco"
+    "Migrados com informações incompletas"
+  Qualquer outro valor retorna HTTP 422 (Unprocessable Entity).
+
+
+================================================================================
+  14. AS REGRAS QUE VOCÊ NUNCA PODE VIOLAR
+================================================================================
+
+Estas são as invariantes do sistema. Violar qualquer uma causa bugs
+graves ou compromete a integridade financeira das operações.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  REGRA 1: banco="HOPE" é HARDCODADO APENAS EM DOIS LUGARES
+
+    Backend  → services/hope_adapter.py   (correto)
+    Frontend → src/lib/hopeAdapter.ts     (correto)
+
+    Em QUALQUER outro arquivo, banco="HOPE" é um BUG.
+
+    Por quê: Titan = sistema exclusivo do banco Hope. Só faz sentido
+    hardcodar lá. Na Storm, "HOPE" nunca deve aparecer pois Storm é um
+    hub de outros bancos.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  REGRA 2: O MOTOR NUNCA APROVA AUTOMATICAMENTE
+
+    O motor antifraude só pode gerar:
+      → BLOQUEADA      (fraude detectada)
+      → ANALISE_MANUAL (revisão humana necessária)
+
+    A transição para APROVADA SEMPRE requer ação humana via:
+      POST /propostas/{id}/aprovar
+
+    Por quê: requisito legal e de compliance. Toda aprovação de crédito
+    precisa de responsável humano identificado na trilha de auditoria.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  REGRA 3: auditoria_logs É APPEND-ONLY
+
+    Nunca delete ou altere registros da tabela auditoria_logs.
+    É a trilha de auditoria legal. Deletar é obstrução de auditoria.
+    Logs de ações de usuários (logs_auditoria) seguem a mesma regra.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  REGRA 4: proposta_id_externo É A CHAVE DE IDEMPOTÊNCIA
+
+    Formato:
+      "titan-{id}" → Hope
+      "storm-{ff}" → Storm
+      outros       → manual
+
+    NUNCA gere proposta_id_externo duplicado intencionalmente.
+    A UniqueConstraint garante isso no banco, mas o código deve
+    respeitar o padrão para as deduplicações funcionarem.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  REGRA 5: ROTAS ESPECÍFICAS ANTES DE /{id} NO FASTAPI
+
+    FastAPI faz match em ordem. Se /{proposta_id} vier antes de /search,
+    a palavra "search" será interpretada como um ID → erro silencioso.
+
+    Sempre coloque rotas específicas (/summary, /dashboard, /search, etc.)
+    ANTES da rota dinâmica (/{id}) no código do router.
+
+    Exemplo correto em propostas.py:
+      @router.get("/summary")        # ← primeiro
+      @router.get("/dashboard")      # ← primeiro
+      @router.get("/search")         # ← primeiro
+      @router.get("/{proposta_id}")  # ← por último
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  REGRA 6: STORM NUNCA RETORNA "HOPE" COMO BANCO
+
+    A função extrair_banco() em storm_adapter.py e stormAdapter.ts
+    NUNCA pode retornar a string "HOPE". Storm é um hub de outros bancos
+    (BMG, Pan, etc.). Se "HOPE" aparecer em dados Storm, é um bug.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+================================================================================
+  15. FLUXO COMPLETO DE UMA PROPOSTA
+================================================================================
+
+ENTRADA VIA SYNC:
+  POST /titan/sync ou /storm/sync
+    ↓
+  titan_sync.py ou storm_sync.py
+    ↓
+  hope_adapter.py ou storm_adapter.py (converte formato externo → PropostaCreate)
+    ↓
+  POST /propostas/ internamente (cria com status=ENFILEIRADA)
+    ↓
+  _processar_sync(proposta_id)  ← dev (inline)
+  processar_proposta.delay()    ← prod (Celery)
+
+ENTRADA MANUAL:
+  POST /propostas/ com payload PropostaCreate
+    ↓
+  cria com status=ENFILEIRADA
+    ↓
+  _processar_sync(proposta_id)
+
+PROCESSAMENTO PELO MOTOR:
+  ENFILEIRADA
+    ↓ _processar_sync()
+  EM_ANALISE (temporário, enquanto motor roda)
+    ↓ antifraude.avaliar(proposta)
+  ANALISE_MANUAL  ← padrão (score < 80)
+  BLOQUEADA       ← automático (score >= 80 ou regra bloqueante)
+
+DECISÃO HUMANA:
+  Analista na Mesa de Crédito (DashboardPage):
+    → POST /propostas/{id}/aprovar  → APROVADA
+    → POST /propostas/{id}/bloquear → BLOQUEADA
+
+REPROCESSAMENTO:
+  Se ERRO ou BLOQUEADA → POST /propostas/{id}/reprocessar → ENFILEIRADA
+  Motor roda novamente com as regras atuais.
+
+REGISTROS DE AUDITORIA:
+  Cada transição de status cria um registro em auditoria_logs.
+  Visualizar via: GET /propostas/{id}/auditoria
+
+
+================================================================================
+  16. STATUS DE PROPOSTAS — TODOS OS ESTADOS
+================================================================================
+
+  STATUS            QUEM COLOCA       SIGNIFICADO
+  ────────────────────────────────────────────────────────────────────
+  ENFILEIRADA       automático        Recém-criada, aguardando motor
+  EM_ANALISE        automático        Motor rodando (transitório, segundos)
+  ANALISE_MANUAL    motor             Requer revisão humana
+  APROVADA          humano            Analista aprovou — NUNCA automático
+  REPROVADA         humano            Analista reprovou definitivamente
+  BLOQUEADA         motor ou humano   Fraude detectada (auto) ou manual
+  ENVIADA_BANCO     futuro            Proposta enviada ao banco (não impl. ainda)
+  CONFIRMADA_BANCO  futuro            Banco confirmou (não impl. ainda)
+  ERRO              automático        Falha no processamento (ver proposta.ultimo_erro)
+
+TRANSIÇÕES VÁLIDAS VIA API:
+  ANALISE_MANUAL →  APROVADA  (POST .../aprovar)
+  qualquer       →  BLOQUEADA (POST .../bloquear)
+  ERRO|BLOQUEADA →  ENFILEIRADA (POST .../reprocessar)
+
+
+================================================================================
+  17. USUÁRIOS E PERMISSÕES
+================================================================================
+
+PERFIS (do mais ao menos permissivo):
+  admin    → tudo, incluindo criar/editar usuários
+  gestor   → ver usuários, aprovar/bloquear, reprocessar em lote
+  analista → aprovar/bloquear propostas
+  operador → apenas visualizar
+
+USUÁRIOS DE SEED (para desenvolvimento):
+  admin / admin123   → perfil admin
+  cesar / cesar123   → perfil gestor
+  leo / leo123       → perfil analista
+  julia / julia123   → perfil analista
+  sergio / sergio123 → perfil operador
+
+PROTEÇÃO BACKEND:
+  Depends(verificar_token)                           → qualquer autenticado
+  Depends(exigir_perfis(["admin"]))                  → só admin
+  Depends(exigir_perfis(["admin", "gestor"]))        → admin ou gestor
+  Depends(exigir_perfis(["admin","gestor","analista"])) → exceto operador
+
+PROTEÇÃO FRONTEND:
+  Apenas visual (UX). A proteção real sempre está no backend.
+  Um operador que chame a API diretamente recebe 403 Forbidden.
+
+Para detalhes completos de permissões: HIERARQUIA_USUARIOS.txt
+
+
+================================================================================
+  18. COMO ADICIONAR UM NOVO ENDPOINT
+================================================================================
+
+EXEMPLO: adicionar GET /relatorios/por-corretor-diario
+
+PASSO 1 — Backend: adicionar ao router existente
+  Arquivo: backend/app/routers/relatorios.py
+
+  @router.get("/por-corretor-diario")
+  def relatorio_por_corretor_diario(
+      data: date = Query(...),
+      db: Session = Depends(get_db),
+      usuario = Depends(verificar_token),
+  ):
+      # sua lógica aqui
+      rows = db.query(Proposta).filter(
+          Proposta.criado_em >= datetime.combine(data, time.min),
+          Proposta.criado_em < datetime.combine(data + timedelta(days=1), time.min)
+      ).all()
+      return {"data": str(data), "total": len(rows)}
+
+  (relatorios.py já está registrado em main.py — não precisa fazer nada)
+
+PASSO 2 — Frontend: adicionar a chamada em api.ts
+  export const getRelatorioPorCorretorDiario = (data: string) =>
+    api.get("/relatorios/por-corretor-diario", { params: { data } })
+       .then(r => r.data);
+
+PASSO 3 — Frontend: usar na página
+  const { data } = useQuery({
+    queryKey: ['relatorio-corretor', dataFiltro],
+    queryFn: () => getRelatorioPorCorretorDiario(dataFiltro),
+  });
+
+PASSO 4 — Verificar
+  http://localhost:8000/docs → deve aparecer GET /relatorios/por-corretor-diario
+  Testar via Swagger antes de integrar no frontend.
+
+SE FOR UM NOVO ROUTER (não existia antes):
+  1. Criar backend/app/routers/meu_recurso.py com APIRouter
+  2. Adicionar em main.py: app.include_router(meu_recurso.router, prefix="/meu-recurso")
+  3. Adicionar no proxy do Vite (frontend/vite.config.ts):
+     "/meu-recurso": { target: "http://localhost:8000", changeOrigin: true }
+
+
+================================================================================
+  19. ARMADILHAS E PROBLEMAS CONHECIDOS
+================================================================================
+
+PROBLEMA 1: uvicorn --reload não detecta mudanças no Windows OneDrive
+  Causa: OneDrive usa locks de arquivo que confundem o file watcher.
+  Sintoma: você edita um arquivo, o server não reinicia.
+  Solução:
+    1. Matar todos os processos Python:
+       PowerShell: Get-Process -Name "python*" | Stop-Process -Force
+    2. Reiniciar o uvicorn manualmente.
+  Alternativa de longo prazo: mover o projeto para fora do OneDrive.
+
+PROBLEMA 2: "NameError: name 'Query' is not defined"
+  Causa: FastAPI's Query (para parâmetros de URL) precisa ser importado
+    explicitamente de fastapi, não vem automático.
+  Solução: from fastapi import APIRouter, Depends, HTTPException, Query, ...
+
+PROBLEMA 3: Contrato duplicado na busca
+  Causa: buscar "76525" → Hope retorna ID 76525 + local ILIKE '%76525%'
+    bate em "titan-76525" → mesmo contrato aparece 2 vezes.
+  Como foi resolvido (v2.5): após Hope retornar o ID, filtra do local
+    qualquer proposta cujo id_externo contém aquele ID.
+  Se aparecer de novo: verificar a lógica de dedup em buscar.py.
+
+PROBLEMA 4: FastAPI rota /{id} capturando rotas estáticas
+  Causa: /propostas/dashboard sendo interpretado como proposta ID "dashboard"
+    porque /{proposta_id} estava antes no código.
+  Solução: sempre colocar rotas estáticas (/search, /summary, /dashboard)
+    ANTES da rota dinâmica (/{id}) no arquivo do router.
+
+PROBLEMA 5: Storm retornando 401 na primeira requisição após muito tempo
+  Causa: token OAuth2 expirado. O cliente Storm (services/storm.py)
+    renova automaticamente, mas a primeira chamada após expiração falha.
+  Solução: retry automático com tenacity (já configurado). Se persistir:
+    POST /storm/status/reset para resetar o circuit breaker.
+
+PROBLEMA 6: Seed falha com "already exists"
+  Causa: rodou seed.py mais de uma vez com dados existentes.
+  Solução: ou limpar o banco antes do seed, ou o seed já tem ON CONFLICT
+    IGNORE (verificar). Para reset total:
+      psql -U postgres -c "DROP DATABASE antifraude; CREATE DATABASE antifraude;"
+      python seed.py
+
+PROBLEMA 7: CPF com máscara não encontra no banco
+  Causa: banco armazena CPF só com dígitos. Busca "123.456.789-00" não bate.
+  Como foi resolvido (v2.5): a função _busca_local() extrai só dígitos do
+    query antes de comparar com cpf_cliente.
+  Se adicionar novo campo de CPF: manter o mesmo padrão (digits only).
+
+PROBLEMA 8: CORS em desenvolvimento
+  Causa: frontend (:3000) e backend (:8000) em portas diferentes.
+  Solução já aplicada: proxy Vite em vite.config.ts. Todo request do
+    frontend vai para :3000 que proxia para :8000. CORS não é problema.
+  Se adicionar novo router: adicionar prefixo ao proxy.
+
+PROBLEMA 9: Proposta travada em EM_ANALISE
+  Causa: motor travou (crash, timeout) antes de atualizar o status.
+  Solução (Celery Beat, 5 min): varredura() em workers/tasks.py marca
+    EM_ANALISE travadas há mais de 10 min como ERRO.
+  Em dev (sem Celery): usar POST /propostas/{id}/reprocessar manualmente.
+
+
+================================================================================
+  20. PRÓXIMOS PASSOS SUGERIDOS
+================================================================================
+
+Com base no estado atual do sistema (v2.1.0, junho 2026), as melhorias
+mais impactantes que ainda não foram implementadas:
+
+ALTA PRIORIDADE:
+  [ ] Envio de proposta ao banco parceiro após APROVADA
+      Hoje: analista aprova no sistema, mas precisa enviar para o banco
+      manualmente por fora. Implementar POST /propostas/{id}/enviar-banco
+      que chame a API do banco correspondente.
+
+  [ ] Refresh token de autenticação
+      Hoje o JWT expira em 8h e o usuário precisa logar de novo.
+      Implementar refresh token para sessões mais longas.
+
+  [ ] Tela de configuração das regras antifraude com editor visual
+      Hoje as regras são editadas via Swagger ou /regras pelo payload JSON.
+      Uma UI amigável na tela /regras permitiria ao gestor configurar
+      sem precisar de desenvolvedor.
+
+MÉDIA PRIORIDADE:
+  [ ] Notificações em tempo real (WebSocket ou Server-Sent Events)
+      Hoje o dashboard atualiza a cada 10s via polling.
+      WebSocket notificaria imediatamente quando uma proposta nova chega.
+
+  [ ] Relatório exportável em Excel/CSV
+      Os endpoints /relatorios/* existem mas retornam só JSON.
+      Adicionar Content-Disposition: attachment + formato CSV/XLSX.
+
+  [ ] Integração com assinatura eletrônica
+      Após APROVADA, contratos precisam de assinatura do cliente.
+      Integrar com plataformas como ClickSign ou DocuSign.
+
+  [ ] Testes automatizados
+      O projeto não tem suite de testes. A maior necessidade é:
+      - Testes do motor antifraude (antifraude.py) — crítico
+      - Testes dos adapters (hope_adapter, storm_adapter) — importante
+      - Testes de integração dos endpoints principais
+
+BAIXA PRIORIDADE:
+  [ ] Dashboard de métricas do motor (taxa de bloqueio, score médio)
+  [ ] Painel de gestão de convênios com categorização automática
+  [ ] App mobile para aprovações rápidas (React Native)
+  [ ] Integração com bureau de crédito (Serasa, SPC) para score externo
+
+DÍVIDA TÉCNICA:
+  [ ] Mover processamento de dev (inline) para Celery mesmo em dev
+  [ ] Adicionar índice em propostas.nome_cliente (melhora busca ILIKE)
+  [ ] Parametrizar ALLOWED_ORIGINS no CORS (hoje está allow_origins=["*"])
+  [ ] Alembic migrations (hoje usa create_all que não versiona o schema)
+
+
+================================================================================
+  PERGUNTAS FREQUENTES PARA O DESENVOLVEDOR ANTERIOR
+================================================================================
+
+Q: Por que o frontend roda na porta 3000 e não 5173 (padrão Vite)?
+A: Foi configurado manualmente em vite.config.ts (server.port: 3000) para
+   padronizar com outros projetos da Unica e simplificar configuração de
+   ambiente.
+
+Q: Por que SQLite não é usado mesmo em dev?
+A: Foi uma decisão de paridade dev/prod. PostgreSQL tem recursos (JSONB,
+   índices parciais, ILIKE case-insensitive) que SQLite não tem ou trata
+   diferente. Manter o mesmo banco em todos os ambientes evita surpresas.
+
+Q: Por que o frontend não usa Redux ou Context API para estado global?
+A: Dados do servidor ficam em TanStack Query (cache + refetch). O único
+   estado verdadeiramente global (usuário logado, tema) fica em localStorage.
+   Não foi necessário Redux. Zustand está instalado mas pouco usado.
+
+Q: O que é o "Flower"?
+A: Dashboard web do Celery (porta 5555 no Docker). Mostra filas de tarefas,
+   workers ativos, tasks concluídas/falhas. Útil para debug em produção.
+
+Q: Por que algumas telas do Storm têm campos que às vezes vêm nulos?
+A: A API Storm retorna estruturas inconsistentes dependendo do status do
+   contrato. storm-utils.ts tenta normalizar esses casos com fallbacks.
+   Se aparecer um novo campo undefined, adicione o fallback lá.
+
+Q: Como saber de qual banco veio uma proposta?
+A: Pelo campo proposta_id_externo:
+     "titan-*"  → Hope (via Titan/Ceoslab)
+     "storm-*"  → Storm (hub multibanco)
+     sem prefixo → entrada manual
+   O campo "origem" no PropostaDashboardItem é derivado disso em tempo real
+   por determinar_origem() em propostas_dashboard.py.
+
+
+================================================================================
+  CONTATOS E REPOSITÓRIO
+================================================================================
+
+  Repositório  : https://github.com/DevCesarUnica/antifraude-unica
+  Email contato: financeiro@unicapromotora.com.br
+  Empresa      : Unica Promotora de Vendas
+
+  Documentação técnica completa: DOCUMENTACAO_TECNICA.txt (v2.5)
+  Guia de instalação           : INSTALACAO.txt
+  Hierarquia de usuários       : HIERARQUIA_USUARIOS.txt
+  Stack tecnológica            : TECNOLOGIAS.txt
+
+
+================================================================================
+  FIM DO DOCUMENTO — BOA SORTE!
+================================================================================

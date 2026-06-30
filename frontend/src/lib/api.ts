@@ -453,4 +453,10 @@ export const importarBlacklist = (file: File) => {
 export const buscarContrato = (numero: string) =>
   api.get("/buscar/contrato", { params: { numero } }).then((r) => r.data);
 
+export const buscarPropostasLocal = (q: string, limit = 50) =>
+  api.get("/buscar/propostas", { params: { q, limit } }).then((r) => r.data);
+
+export const searchPropostas = (q: string, limit = 50) =>
+  api.get("/propostas/search", { params: { q, limit } }).then((r) => r.data);
+
 export default api;

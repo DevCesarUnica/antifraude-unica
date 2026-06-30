@@ -1,13 +1,20 @@
 """
-Busca global de contratos por número.
+Busca global de contratos.
 
-Estratégia de prioridade:
-  1. Hope/Titan  — prioridade máxima (lookup direto por ID numérico)
-  2. Storm       — secundário (só se formato FF-DD/MM/YYYY-N detectado)
-  3. Banco local — complemento (proposta_id_externo LIKE %numero%)
+Estratégia de prioridade em /buscar/contrato:
+  1. Hope/Titan  — prioridade máxima (lookup por ID numérico)
+  2. Storm       — secundário (formato FF-DD/MM/YYYY-N)
+  3. Banco local — complemento (ADE, CPF e nome — OR entre os três)
 
-Nunca lança 4xx/5xx se uma fonte estiver offline — retorna null para ela
-e continua com as demais (fail gracefully).
+Deduplicação automática: se Hope encontrou o contrato, registros locais
+com o mesmo ID são suprimidos (evita mostrar "titan-76525" quando Hope
+já retornou ID 76525).
+
+Fontes offline nunca param a busca — retornam null e entram em
+fontes_com_erro (fail gracefully).
+
+/buscar/propostas: busca textual pura no banco local, sem chamar APIs
+externas. Útil para autocomplete e consulta por CPF / nome completo.
 """
 from __future__ import annotations
 
@@ -15,6 +22,7 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -110,7 +118,46 @@ def _normalizar_local(p: Proposta) -> dict:
     }
 
 
-# ── Endpoint ──────────────────────────────────────────────────────────────────
+def _busca_local(
+    db: Session,
+    q: str,
+    limit: int = 20,
+) -> list[dict]:
+    """
+    Busca no banco local por ADE, CPF (apenas dígitos) ou nome do cliente.
+    Retorna lista normalizada, deduplicada por proposta_id_externo,
+    ordenada por data de importação decrescente.
+    """
+    q = q.strip()
+    clean_digits = re.sub(r"\D", "", q)
+
+    conditions: list = [
+        Proposta.proposta_id_externo.ilike(f"%{q}%"),
+        Proposta.nome_cliente.ilike(f"%{q}%"),
+    ]
+    # Só compara CPF se o fragmento tiver ao menos 3 dígitos (evita falsos positivos)
+    if len(clean_digits) >= 3:
+        conditions.append(Proposta.cpf_cliente.like(f"%{clean_digits}%"))
+
+    rows = (
+        db.query(Proposta)
+        .filter(or_(*conditions))
+        .order_by(Proposta.criado_em.desc())
+        .limit(limit)
+        .all()
+    )
+
+    seen: set[str] = set()
+    result: list[dict] = []
+    for p in rows:
+        if p.proposta_id_externo not in seen:
+            seen.add(p.proposta_id_externo)
+            result.append(_normalizar_local(p))
+
+    return result
+
+
+# ── Endpoint: busca por número de contrato (Hope + Storm + local) ─────────────
 
 @router.get("/contrato")
 async def buscar_contrato(
@@ -120,8 +167,8 @@ async def buscar_contrato(
     """
     Busca um contrato por número em todas as fontes disponíveis.
 
-    Hope retorna primeiro (prioridade). Storm e banco local complementam.
-    Fontes offline retornam null sem interromper a busca.
+    Hope retorna com prioridade máxima. Registros locais cuja chave
+    contém o ID Hope são removidos automaticamente para evitar duplicatas.
     """
     numero = numero.strip()
     is_numeric = numero.isdigit()
@@ -157,16 +204,19 @@ async def buscar_contrato(
         except Exception:
             fontes_erro.append("storm")
 
-    # ── 3. Banco local ────────────────────────────────────────────────────────
+    # ── 3. Banco local (ADE + CPF + nome) ────────────────────────────────────
     try:
-        rows = (
-            db.query(Proposta)
-            .filter(Proposta.proposta_id_externo.ilike(f"%{numero}%"))
-            .order_by(Proposta.criado_em.desc())
-            .limit(5)
-            .all()
-        )
-        local_resultados = [_normalizar_local(p) for p in rows]
+        local_resultados = _busca_local(db, numero, limit=20)
+
+        # Deduplicação Hope↔Local: se Hope encontrou ID X, remove do local
+        # qualquer proposta cujo id_externo contém esse mesmo número
+        # (ex: Hope retornou 76525, local tem "titan-76525" — são o mesmo contrato)
+        if hope_resultado:
+            hope_id = hope_resultado["id"]
+            local_resultados = [
+                r for r in local_resultados
+                if hope_id not in (r.get("id_externo") or "")
+            ]
     except Exception:
         fontes_erro.append("local")
 
@@ -177,10 +227,37 @@ async def buscar_contrato(
     )
 
     return {
-        "numero_buscado": numero,
+        "numero_buscado":    numero,
         "total_encontrados": total,
-        "hope":  hope_resultado,
-        "storm": storm_resultado,
-        "local": local_resultados,
-        "fontes_com_erro": fontes_erro,
+        "hope":              hope_resultado,
+        "storm":             storm_resultado,
+        "local":             local_resultados,
+        "fontes_com_erro":   fontes_erro,
+    }
+
+
+# ── Endpoint: busca textual pura no banco local ───────────────────────────────
+
+@router.get("/propostas")
+def buscar_propostas_local(
+    q: str   = Query(..., min_length=2, description="ADE, CPF (com ou sem máscara) ou nome do cliente"),
+    limit: int = Query(50, ge=1, le=100, description="Máximo de resultados (padrão 50)"),
+    db: Session = Depends(get_db),
+):
+    """
+    Busca textual no banco de dados local.
+
+    Pesquisa simultaneamente em:
+      - ADE / proposta_id_externo  (ILIKE)
+      - CPF do cliente             (LIKE nos dígitos)
+      - Nome do cliente            (ILIKE)
+
+    Resultados ordenados por data de importação decrescente, sem duplicatas.
+    Não acessa APIs externas — ideal para autocomplete e consultas rápidas.
+    """
+    resultados = _busca_local(db, q.strip(), limit=limit)
+    return {
+        "query":      q.strip(),
+        "total":      len(resultados),
+        "resultados": resultados,
     }

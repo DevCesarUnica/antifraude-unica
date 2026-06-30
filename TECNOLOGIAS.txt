@@ -1,6 +1,11 @@
 ================================================================================
                     TECNOLOGIAS DO SISTEMA ANTIFRAUDE
 ================================================================================
+  Última atualização: 30/06/2026
+  Versão: 2.5
+  Projeto: Sistema Antifraude - Unica Promotora
+================================================================================
+
 
 ================================================================================
 BACKEND (Python)
@@ -40,6 +45,7 @@ RESILIÊNCIA E LOGS
 UTILITÁRIOS
   - uuid 1.30                Geração de identificadores únicos
 
+
 ================================================================================
 FRONTEND (TypeScript / React)
 ================================================================================
@@ -47,12 +53,12 @@ FRONTEND (TypeScript / React)
 FRAMEWORK E BUILD
   - React 18.3               Biblioteca UI baseada em componentes
   - TypeScript 5.4            Tipagem estática sobre JavaScript
-  - Vite 5.3                 Bundler e servidor de desenvolvimento
+  - Vite 5.3                 Bundler e servidor de desenvolvimento (porta 3000)
 
 ROTEAMENTO E ESTADO
   - React Router DOM 6.24    Roteamento SPA (Single Page Application)
   - Zustand 4.5              Gerenciamento de estado global leve
-  - TanStack React Query 5.45 Cache e sincronização de dados do servidor
+  - TanStack React Query 5.x Cache e sincronização de dados do servidor
 
 ESTILIZAÇÃO
   - Tailwind CSS 3.4          Framework CSS utilitário
@@ -65,11 +71,11 @@ ESTILIZAÇÃO
 COMPONENTES E GRÁFICOS
   - Recharts 2.12             Gráficos e dashboards baseados em SVG
   - Lucide React 0.400        Biblioteca de ícones SVG
-  - TanStack React Query 5.x  Cache e sincronização de dados do servidor
 
 HTTP E UTILITÁRIOS
   - Axios 1.7                 Cliente HTTP para consumo da API REST
   - date-fns 3.6              Manipulação e formatação de datas
+
 
 ================================================================================
 RPA (Robotic Process Automation)
@@ -81,13 +87,16 @@ RPA (Robotic Process Automation)
   - structlog 24.2.0         Logging estruturado
   - python-dotenv 1.0.1      Gerenciamento de variáveis de ambiente
 
+
 ================================================================================
 INFRAESTRUTURA E BANCO DE DADOS
 ================================================================================
 
-  - PostgreSQL                Banco de dados relacional principal (produção)
-  - SQLite                   Banco de dados para desenvolvimento/testes locais
-  - Redis                    Cache e broker de mensagens (Celery)
+  - PostgreSQL 16             Banco de dados relacional principal em TODOS os ambientes
+                              (dev e produção). Não é usado SQLite.
+  - Redis 7                   Cache e broker de mensagens (Celery)
+  - Docker / Docker Compose   Containerização completa do ambiente de produção
+
 
 ================================================================================
 LINGUAGENS
@@ -98,20 +107,40 @@ LINGUAGENS
   - SQL                      Queries e migrações
   - HTML / CSS               Interface web
 
+
 ================================================================================
-ARQUITETURA
+PADRÕES ARQUITETURAIS
 ================================================================================
 
-  - SPA (Single Page Application)    Frontend React servido pelo Vite
-  - REST API                         Backend FastAPI com endpoints JSON
+  - SPA (Single Page Application)    Frontend React servido pelo Vite (porta 3000)
+  - REST API                         Backend FastAPI com endpoints JSON (porta 8000)
   - ORM + Migrations                 SQLAlchemy + Alembic
   - Task Queue                       Celery + Redis para processamento assíncrono
-  - JWT Authentication               Tokens de acesso e refresh
+  - JWT Authentication               Token Bearer em localStorage, expiração 8h
   - Circuit Breaker                  Padrão de resiliência para APIs externas
+  - Retry + Backoff                  tenacity em todas as chamadas às APIs externas
+  - Fail-Graceful                    Fonte offline retorna null; outras fontes continuam
   - RPA                              Playwright para automação bancária
+  - Idempotência                     UniqueConstraint em proposta_id_externo
+  - Vite Proxy                       Dev server em :3000 proxia :8000 (elimina CORS)
+
 
 ================================================================================
-Gerado em: 2026-06-26
-Versão: 2.3
-Projeto: Sistema Antifraude - Unica Promotora
+INTEGRAÇÕES EXTERNAS
+================================================================================
+
+  Hope / Titan (ceoslab.app)
+    API REST com autenticação Bearer (TITAN_API_KEY).
+    Acesso exclusivo ao banco Hope. Banco hardcodado "HOPE".
+    Endpoints: operações, bancos, produtos, referência.
+
+  Storm Tecnologia
+    API REST com OAuth2 Resource Owner Password Grant.
+    Hub multibanco (BMG, Pan, Prefeituras, etc.).
+    Banco SEMPRE dinâmico — NUNCA hardcodar "HOPE".
+    Endpoints: contratos, antifraude, clientes, colaboradores, simulações.
+
+
+================================================================================
+  Unica Promotora — Sistema Antifraude | Mesa de Crédito
 ================================================================================

@@ -316,8 +316,6 @@ def aprovar_manual(
         risco="ALTO",
     )
     db.commit()
-
-    processar_proposta.apply_async(args=[proposta_id], queue="propostas")
     return proposta
 
 

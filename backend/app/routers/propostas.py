@@ -353,6 +353,95 @@ def bloquear_manual(
     return proposta
 
 
+@router.post("/{proposta_id}/enviar-banco", response_model=PropostaOut)
+async def enviar_banco(
+    proposta_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
+    """
+    Envia proposta APROVADA para criação na API Titan (Hope / banco parceiro).
+    Extrai automaticamente os dados financeiros do payload_original.
+    Status: APROVADA → ENVIADA_BANCO.
+    Armazena id_operacao_banco e resposta_banco no registro.
+    """
+    from app.services.titan_envio import extrair_calculo_de_payload, enviar_para_titan
+    from app.core.config import settings
+
+    proposta = _get_ou_404(db, proposta_id)
+    _exige_status(proposta, StatusProposta.APROVADA)
+
+    calculo = extrair_calculo_de_payload(proposta.payload_original)
+    if not calculo:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Não foi possível extrair dados financeiros (firstDueDate, installmentQuantity, "
+                "totalValue, financedValue, installments) do payload desta proposta. "
+                "Propostas Hope importadas via /titan/sync têm esses dados automaticamente. "
+                "Propostas Storm ou manuais ainda não suportam envio automático ao banco."
+            ),
+        )
+
+    resultado = await enviar_para_titan(
+        proposta=proposta,
+        calculo=calculo,
+        base_url=settings.titan_base_url,
+        api_key=settings.titan_api_key,
+    )
+
+    proposta.resposta_banco = resultado.get("raw_response")
+
+    if resultado["status"] in ("APROVADA", "DUPLICADA"):
+        if resultado.get("operation_id"):
+            proposta.id_operacao_banco = str(resultado["operation_id"])
+        proposta.status = StatusProposta.ENVIADA_BANCO
+        proposta.ultimo_erro = None
+
+        AuditoriaService(db).registrar(
+            proposta_id,
+            TipoEvento.ENVIO_BANCO,
+            dados={
+                "acao":         "envio_banco_titan",
+                "resultado":    resultado["status"],
+                "operation_id": resultado.get("operation_id"),
+                "mensagem":     resultado["mensagem"],
+            },
+            usuario=usuario.username,
+            ip_origem=request.client.host if request.client else None,
+        )
+        log_auditoria(
+            db,
+            acao=f"Enviou proposta {proposta.proposta_id_externo} ao banco Titan",
+            usuario=usuario,
+            request=request,
+            tipo_entidade="proposta",
+            entidade_id=proposta_id,
+            antes={"status": "APROVADA"},
+            depois={"status": "ENVIADA_BANCO", "operation_id": resultado.get("operation_id")},
+            risco="ALTO",
+        )
+        db.commit()
+        return proposta
+
+    if resultado["status"] == "RECUSADA":
+        proposta.ultimo_erro = resultado["mensagem"]
+        db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=f"Titan recusou a proposta: {resultado['mensagem']}",
+        )
+
+    # ERRO_API
+    proposta.ultimo_erro = resultado["mensagem"]
+    db.commit()
+    raise HTTPException(
+        status_code=503,
+        detail=f"Titan temporariamente indisponível: {resultado['mensagem']}",
+    )
+
+
 @router.post("/{proposta_id}/reprocessar", response_model=Mensagem)
 def reprocessar(
     proposta_id: str,

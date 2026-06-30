@@ -1,0 +1,311 @@
+================================================================================
+  TITAN API — ENVIO DE PROPOSTAS APROVADAS
+  Referência: POST /api/operations/create
+================================================================================
+  Documento criado: 30/06/2026
+  Projeto: Sistema Antifraude - Unica Promotora
+  Arquivo de implementação: backend/app/services/titan_envio.py
+================================================================================
+
+
+================================================================================
+  1. QUANDO CHAMAR POST /api/operations/create
+================================================================================
+
+Este endpoint cria uma operação de crédito no sistema Titan (Hope).
+No fluxo antifraude, ele é chamado APÓS a aprovação interna:
+
+  [Proposta recebida]
+         ↓
+  [Validação de dados básicos]
+         ↓
+  [Motor antifraude interno] ← regras de negócio, score, bureau
+         ↓
+  [APROVADO internamente?]
+         ↓ SIM
+  [Calcular parcelas, IOF, TEC, CET] ← motor de cálculo
+         ↓
+  [POST /api/operations/create] ← aqui entra este endpoint
+         ↓
+  [Retorna operation_id]
+         ↓
+  [Gerar documentos → Assinar → Ceder]
+
+NO SISTEMA ANTIFRAUDE:
+  O botão "Enviar ao Banco" aparece no modal quando status = APROVADA.
+  O sistema extrai automaticamente os dados financeiros do payload_original
+  para propostas que vieram do Hope (titan-*). Para outras origens, os
+  dados precisam estar no payload_original ou serem fornecidos manualmente.
+
+
+================================================================================
+  2. EXEMPLO REAL DE REQUISIÇÃO COMPLETA
+================================================================================
+
+Headers:
+  POST {{base_url}}/api/operations/create
+  Content-Type: application/json
+  Titan-Api-Key: {{api_key}}
+
+  NOTA: A autenticação usa o header "Titan-Api-Key" (não Bearer).
+  O sistema também envia Authorization: Bearer por compatibilidade.
+
+Body (PF — Pessoa Física):
+  {
+      "acceptanceDate": "2026-01-21",
+      "firstDueDate": "2026-02-21",
+      "installmentQuantity": 12,
+      "requestedValue": 10000.00,
+      "downPayment": 2000.00,
+      "paymentFrequencyID": 51,
+      "paymentMethodID": 2,
+      "productID": 4401,
+      "operationStatusID": 19,
+      "companyID": 7701,
+      "companyType": "CS",
+      "inPersonSale": false,
+      "monthlyInterestRate": 0.015,
+      "monthlyTEC": 0.021818,
+      "yearlyTEC": 0.295638,
+      "installmentValueWithIOF": 957.42,
+      "iofRate": 0.000082,
+      "additionalIOFRate": 0.0038,
+      "totalIOFValue": 208.59,
+      "financedIOFValue": 212.93,
+      "gracePeriod": 31,
+      "totalValue": 11489.04,
+      "creditLifeInsurancePct": 0.022493,
+      "creditLifeInsurance": 224.93,
+      "additionalInsuranceValue": 0.00,
+      "financeIOF": true,
+      "financeTFC": true,
+      "financeCreditLifeInsurance": true,
+      "financeAdditionalInsurance": false,
+      "financedValue": 10437.86,
+      "tfc": 0.00,
+      "tfcPct": 0.00,
+      "customer": {
+          "person": {
+              "email": "cliente@email.com",
+              "fullName": "Maria Teste",
+              "documentNumber": "99988877704",
+              "mobilePhoneNumber": "5511999999999",
+              "birthdate": "1990-01-01",
+              "declaredIncome": 3000.00,
+              "accounts": [{
+                  "agencyNumber": "1234",
+                  "accountNumber": "56789",
+                  "accountNumberDigit": "0",
+                  "accountTypeID": 1,
+                  "bankCode": 237,
+                  "primaryAccount": true
+              }],
+              "address": {
+                  "postalCode": "01001000",
+                  "countryID": 1,
+                  "level1AdminDivID": 10,
+                  "level2AdminDivID": 990,
+                  "line1": "Rua da Consolação",
+                  "houseNumber": "123",
+                  "neighborhood": "Consolação"
+              },
+              "occupations": [],
+              "socialNetworks": []
+          },
+          "company": null
+      },
+      "guarantors": [],
+      "collaterals": [],
+      "installments": [
+          {
+              "index": 0,
+              "interestRate": 0.015,
+              "baseIOFRate": 0.002542,
+              "additionalIOFRate": 0.0038,
+              "installmentFactor": 0.9847,
+              "valueWithoutIOF": 937.88,
+              "amortization": 800.77,
+              "interest": 156.65,
+              "balance": 9642.28,
+              "baseIOFValue": 1.99,
+              "additionalIOFValue": 2.98,
+              "totalIOFValue": 4.97,
+              "financedIOFValue": 5.08,
+              "valueWithIOF": 957.42,
+              "dueDate": "2026-02-21"
+          }
+      ]
+  }
+
+
+================================================================================
+  3. CAMPOS — OBRIGATÓRIOS, OPCIONAIS E CRÍTICOS
+================================================================================
+
+Campos da operação (raiz):
+
+  Campo                    | Status       | Descrição
+  ─────────────────────────────────────────────────────────────────────────────
+  acceptanceDate           | Obrigatório  | Data de aceite da proposta
+  firstDueDate             | Obrigatório  | Data do primeiro vencimento
+  installmentQuantity      | Obrigatório  | Número de parcelas
+  requestedValue           | Obrigatório  | Valor solicitado pelo cliente
+  productID                | Crítico      | ID do produto (mapeado por banco/convênio)
+  operationStatusID        | Crítico      | 19=PF aprovado, 6=PJ aprovado
+  companyID                | Crítico      | ID da empresa conveniada/agente
+  companyType              | Crítico      | CS=conveniada, AF=afiliada, AO=agente
+  monthlyInterestRate      | Crítico      | Taxa mensal ÷ 100 (ex: 1,5% → 0.015)
+  monthlyTEC / yearlyTEC   | Crítico      | CET mensal e anual (Custo Efetivo Total)
+  installmentValueWithIOF  | Crítico      | Valor de face da parcela com IOF
+  iofRate / additionalIOFRate | Obrigatório | Taxas de IOF
+  totalIOFValue / financedIOFValue | Obrigatório | Valores calculados de IOF
+  totalValue               | Obrigatório  | Soma de todas as parcelas
+  financedValue            | Obrigatório  | Valor total financiado
+  financeIOF / financeTFC  | Obrigatório  | Flags de financiamento de encargos
+  installments             | Crítico      | Array com todas as parcelas calculadas
+  customer                 | Crítico      | Dados do tomador (PF ou PJ, nunca ambos)
+  downPayment              | Opcional     | Entrada/sinal
+  tfc / tfcPct             | Opcional     | Taxa de financiamento de crédito
+  creditLifeInsurance      | Opcional     | Seguro prestamista
+  guarantors               | Opcional     | Avalistas
+  collaterals              | Opcional     | Garantias
+
+Dentro de customer.person:
+  email, fullName, documentNumber | Obrigatório
+  accounts (com primaryAccount:true) | Crítico — conta para desembolso
+  address                 | Obrigatório
+  mobilePhoneNumber, birthdate, declaredIncome | Recomendado
+  mothersFullName, civilStatusID, sexID | Opcional
+
+IDs importantes:
+  operationStatusID: 19 = PF aprovado, 6 = PJ aprovado
+  paymentFrequencyID: 51 = Mensal (consultar /api/operation-payment-frequencies)
+  paymentMethodID: 2 (consultar /api/payment-methods)
+  companyType: CS=conveniada, AF=afiliada, AO=agente
+
+
+================================================================================
+  4. MAPEAMENTO DE IDs (CONFIGURAR CONFORME CATÁLOGO REAL)
+================================================================================
+
+PRODUTO_MAP (backend/app/services/titan_envio.py):
+  "credito_pessoal"  → productID: 4401
+  "consignado"       → productID: 5501
+  "fgts"             → productID: 6601
+  [adicionar conforme catálogo real — consultar GET /titan/bancos/{id}/produtos]
+
+BANCO_MAP (backend/app/services/titan_envio.py):
+  "hope"  → companyID: 7701, companyType: "CS"
+  "titan" → companyID: 7701, companyType: "CS"
+  "storm" → companyID: 7253, companyType: "AO"
+  [ajustar conforme dados reais da integração]
+
+PARA DESCOBRIR OS IDs CORRETOS:
+  GET /titan/bancos              → lista de bancos com IDs
+  GET /titan/bancos/{id}/produtos → produtos disponíveis para um banco
+  GET http://localhost:8000/docs  → Swagger com todos os endpoints Titan
+
+
+================================================================================
+  5. RESPOSTAS DA API E TRATAMENTO
+================================================================================
+
+  HTTP | Significado              | Ação no sistema
+  ─────────────────────────────────────────────────────────────────────────────
+  201  | Operação criada          | Extrai data.id como operation_id → ENVIADA_BANCO
+  400  | Payload inválido         | Registra erro, não faz retry
+  401  | API Key inválida         | Verificar configuração, alertar
+  422  | Erro de negócio          | Registra recusa, não faz retry
+  409  | Operação duplicada       | Busca operation_id existente → ENVIADA_BANCO
+  5xx  | Erro do servidor         | Retry com backoff: 2s → 4s → 8s
+  timeout | API demorou demais    | Retry com mesma idempotency key
+
+IDEMPOTÊNCIA:
+  O sistema gera automaticamente uma X-Idempotency-Key baseada em:
+    SHA256(proposta_id_externo + ":" + cpf + ":" + valor)[:32]
+  Isso garante que, em caso de timeout onde a requisição chegou ao Titan,
+  o retry retornará 409 (DUPLICADA) — tratado como sucesso.
+
+CAMPOS ARMAZENADOS APÓS ENVIO:
+  proposta.id_operacao_banco  = operation_id retornado pelo Titan
+  proposta.resposta_banco     = raw_response JSON completo
+  proposta.status             = ENVIADA_BANCO
+
+
+================================================================================
+  6. FLOW NO SISTEMA (RESUMO TÉCNICO)
+================================================================================
+
+BACKEND (POST /propostas/{id}/enviar-banco):
+  1. Verifica status = APROVADA (obrigatório antes de enviar)
+  2. Extrai calculo de payload_original (para propostas titan-*)
+  3. Monta payload com montar_payload_titan(proposta, calculo)
+  4. Chama enviar_para_titan() com retry backoff
+  5. 201 ou 409 → status=ENVIADA_BANCO, salva operation_id
+  6. 400/422 → HTTPException 422 (Titan recusou)
+  7. 5xx/timeout após retries → HTTPException 503
+
+FRONTEND (PropostaDetalheModal.tsx):
+  - Botão "Enviar ao Banco" aparece quando status === "APROVADA"
+  - Clique → confirmação → POST /propostas/{id}/enviar-banco
+  - Sucesso → modal fecha, tabela atualiza
+  - Erro → mensagem de erro inline no modal
+
+DADOS NECESSÁRIOS NO payload_original (propostas Hope):
+  As propostas importadas via /titan/sync têm o payload_original como
+  resposta bruta do GET /api/operations/{id}. Todos os campos financeiros
+  (installments, monthlyInterestRate, totalValue, etc.) já estão lá.
+
+  O sistema extrai via extrair_calculo_de_payload(payload_original).
+  Campos necessários: firstDueDate, installmentQuantity, monthlyInterestRate,
+  monthlyTEC, yearlyTEC, installmentValueWithIOF, totalIOFValue,
+  financedIOFValue, gracePeriod, totalValue, financedValue, installments.
+
+PROPOSTAS SEM DADOS FINANCEIROS (Storm/manuais):
+  O endpoint retorna HTTP 422 com mensagem explicativa.
+  Futuro: aceitar calculo no body da requisição (não implementado ainda).
+
+
+================================================================================
+  7. CONFIGURAÇÃO NECESSÁRIA NO .env
+================================================================================
+
+  TITAN_API_KEY=sua_chave_aqui
+  TITAN_BASE_URL=https://hope.titan.ceoslab.app/api   (já configurado)
+
+  Verificar: GET /titan/status → deve retornar estado do circuit breaker
+
+
+================================================================================
+  8. COMO AJUSTAR OS IDs DE PRODUTOS E EMPRESAS
+================================================================================
+
+Os valores de productID, companyID e companyType variam conforme o banco
+e convênio. Para descobrir os valores corretos:
+
+  1. Acesse o Swagger: http://localhost:8000/docs
+  2. Chame: GET /titan/bancos              → lista os bancos disponíveis
+  3. Chame: GET /titan/bancos/{id}/produtos → produtos por banco (tem os productIDs)
+  4. Chame: GET /titan/referencia          → dados de referência completos
+
+  Ou consulte a equipe Titan/Ceoslab para obter o mapeamento oficial.
+
+  Após descobrir, atualize PRODUTO_MAP e BANCO_MAP em:
+    backend/app/services/titan_envio.py
+
+
+================================================================================
+  9. PRÓXIMOS PASSOS / MELHORIAS FUTURAS
+================================================================================
+
+  [ ] Adicionar endpoint para aceitar calculo no body (propostas Storm/manuais)
+  [ ] Tela de revisão dos dados financeiros antes de enviar
+  [ ] Consultar GET /titan/operacoes/{id} após envio para confirmar status
+  [ ] Webhook para receber confirmação assíncrona do banco
+  [ ] Suporte a PJ (operationStatusID: 6, company em vez de person)
+  [ ] Integrar com motor de cálculo para propostas sem payload_original
+
+
+================================================================================
+  FIM DO DOCUMENTO
+================================================================================

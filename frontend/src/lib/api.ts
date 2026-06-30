@@ -50,6 +50,9 @@ export const bloquearProposta = (id: string) =>
 export const reprocessarProposta = (id: string) =>
   api.post(`/propostas/${id}/reprocessar`).then((r) => r.data);
 
+export const enviarPropostaBanco = (id: string) =>
+  api.post(`/propostas/${id}/enviar-banco`).then((r) => r.data);
+
 export const getPropostasDashboard = (params?: {
   banco?: string;
   status?: string;

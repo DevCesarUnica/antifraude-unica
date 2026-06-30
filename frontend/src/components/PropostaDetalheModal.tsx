@@ -6,6 +6,7 @@ import {
   aprovarProposta,
   bloquearProposta,
   reprocessarProposta,
+  enviarPropostaBanco,
 } from "@/lib/api";
 
 // ── Tipos exportados ─────────────────────────────────────────────────────────
@@ -133,6 +134,7 @@ interface Props {
   onAprovar?: () => Promise<void>;
   onBloquear?: () => Promise<void>;
   onReprocessar?: () => Promise<void>;
+  onEnviarBanco?: () => Promise<void>;
 }
 
 export default function PropostaDetalheModal({
@@ -141,16 +143,18 @@ export default function PropostaDetalheModal({
   onAprovar,
   onBloquear,
   onReprocessar,
+  onEnviarBanco,
 }: Props) {
   const [auditoria, setAuditoria] = useState<AuditoriaItem[]>([]);
   const [loadingAudit, setLoadingAudit] = useState(false);
-  const [acao, setAcao] = useState<"aprovar" | "bloquear" | "reprocessar" | null>(null);
+  const [acao, setAcao] = useState<"aprovar" | "bloquear" | "reprocessar" | "enviar_banco" | null>(null);
   const [loadingAcao, setLoadingAcao] = useState(false);
   const [msgAcao, setMsgAcao] = useState("");
 
   const defaultAprovar     = (): Promise<void> => aprovarProposta(proposta.id).then(() => {});
   const defaultBloquear    = (): Promise<void> => bloquearProposta(proposta.id).then(() => {});
   const defaultReprocessar = (): Promise<void> => reprocessarProposta(proposta.id).then(() => {});
+  const defaultEnviarBanco = (): Promise<void> => enviarPropostaBanco(proposta.id).then(() => {});
 
   useEffect(() => {
     setLoadingAudit(true);
@@ -164,9 +168,10 @@ export default function PropostaDetalheModal({
     if (!acao) return;
     setLoadingAcao(true); setMsgAcao("");
     try {
-      if (acao === "aprovar")       await (onAprovar ?? defaultAprovar)();
-      else if (acao === "bloquear") await (onBloquear ?? defaultBloquear)();
-      else                          await (onReprocessar ?? defaultReprocessar)();
+      if (acao === "aprovar")           await (onAprovar ?? defaultAprovar)();
+      else if (acao === "bloquear")    await (onBloquear ?? defaultBloquear)();
+      else if (acao === "enviar_banco") await (onEnviarBanco ?? defaultEnviarBanco)();
+      else                             await (onReprocessar ?? defaultReprocessar)();
       onClose();
     } catch {
       setMsgAcao("Erro ao executar ação. Verifique o console.");
@@ -174,9 +179,10 @@ export default function PropostaDetalheModal({
     }
   };
 
-  const podeAprovar     = proposta.status === "ANALISE_MANUAL";
-  const podeBloquear    = ["ANALISE_MANUAL", "APROVADA", "EM_ANALISE"].includes(proposta.status);
-  const podeReprocessar = ["ERRO", "BLOQUEADA"].includes(proposta.status);
+  const podeAprovar      = proposta.status === "ANALISE_MANUAL";
+  const podeBloquear     = ["ANALISE_MANUAL", "APROVADA", "EM_ANALISE"].includes(proposta.status);
+  const podeReprocessar  = ["ERRO", "BLOQUEADA"].includes(proposta.status);
+  const podeEnviarBanco  = proposta.status === "APROVADA";
 
   return (
     <div
@@ -306,13 +312,23 @@ export default function PropostaDetalheModal({
               ↺ Reprocessar
             </button>
           )}
-          {!podeAprovar && !podeBloquear && !podeReprocessar && (
+          {podeEnviarBanco && (
+            <button onClick={() => setAcao("enviar_banco")} disabled={loadingAcao}
+              className="px-4 py-1.5 rounded-lg text-xs font-bold"
+              style={{ backgroundColor: "rgba(168,85,247,0.15)", color: "#a855f7", border: "1px solid rgba(168,85,247,0.3)" }}>
+              ↗ Enviar ao Banco
+            </button>
+          )}
+          {!podeAprovar && !podeBloquear && !podeReprocessar && !podeEnviarBanco && (
             <span className="text-xs" style={{ color: "var(--text-muted)" }}>Nenhuma ação disponível para este status.</span>
           )}
           {acao && (
             <div className="ml-auto flex items-center gap-2">
               <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                Confirmar <strong>{acao}</strong>?
+                Confirmar{" "}
+                <strong>
+                  {acao === "enviar_banco" ? "envio ao banco (Titan)" : acao}
+                </strong>?
               </span>
               <button onClick={executar} disabled={loadingAcao}
                 className="px-3 py-1 rounded text-xs font-bold text-white"

@@ -465,11 +465,33 @@ TIPOS DE REGRA (campo "tipo" na tabela):
                    params: { fatores: [{campo, valor, peso}, ...] }
   LIMITE_DIARIO  — bloqueia se corretor ultrapassaria limite diário
                    params: { "limite_valor_diario": 100000.00 }
+  LIMITE_CORRETOR_SHADOW — placeholder no enum tipo_regra, SEM avaliador
+                   implementado ainda. Depende do vínculo Corretor×Esteira
+                   (ver ANALISE_VINCULO_CORRETOR_PROPOSTA.md). Uma regra
+                   deste tipo é aceita pelo CRUD mas nunca dispara hoje.
+                   Esteiras Comerciais é um módulo separado do motor de
+                   regras — não misturar dados de um com o outro.
+
+SHADOW MODE (por regra, campo shadow_mode):
+  Qualquer regra (inclusive bloqueante=True) pode ser marcada shadow_mode.
+  Nesse caso ela é avaliada e aparece em regras_disparadas com
+  efeito="SHADOW", mas NUNCA soma score nem bloqueia — útil para observar
+  o comportamento de uma regra nova antes de promovê-la para produção real.
+  Regras normais aparecem com efeito="REAL" e mantêm o comportamento de
+  sempre (somam score / bloqueiam conforme configurado).
 
 COMO CONFIGURAR NOVAS REGRAS:
-  Via API: POST /regras/
+  Via tela /regras (Centro de Controle do Antifraude) — recomendado.
+    Aba "Regras": botão "+ Nova Regra" abre um drawer com campos que mudam
+    de acordo com o tipo selecionado, mais um modo avançado (JSON) para
+    quem preferir editar os parâmetros diretamente.
+    Aba "Simulador": testa o motor contra uma proposta fictícia (CPF,
+    banco, convênio, UF, produto, valor) sem persistir nada — mostra
+    score, regras disparadas (com efeito REAL/SHADOW) e resultado final.
+    Botão "Histórico" em cada linha mostra quem criou/editou a regra e
+    quando (lido de logs_auditoria).
+  Via API: POST /regras/ (requer perfil admin ou gestor)
   Via Swagger: http://localhost:8000/docs → /regras POST
-  Ou diretamente na tela /regras do frontend.
 
 AUTO-MAPEAMENTO DE CONVÊNIOS:
   Se uma proposta chegar com um convênio desconhecido, o motor
@@ -483,11 +505,19 @@ RESULTADO SALVO NA PROPOSTA:
     "resultado": "BLOQUEADO",
     "score": 85,
     "motivo_principal": "CPF encontrado na blacklist",
-    "flags": ["regra_blacklist_disparada", ...]
+    "flags": ["regra_blacklist_disparada", ...],
+    "regras_disparadas": [
+      {"regra_id", "nome", "tipo", "score_contribuicao", "bloqueante",
+       "motivo", "detalhes", "efeito": "REAL" | "SHADOW"}, ...
+    ]
   }
+  PropostaDetalheModal.tsx lê regras_disparadas (via GET .../debug) para
+  mostrar a seção "Regras Disparadas" com o toggle "Ver Avaliação Completa".
 
 COMO TESTAR O MOTOR:
   GET /propostas/{id}/debug
+  POST /regras/simular — testa sem precisar de uma proposta real (ver tela
+    /regras, aba Simulador)
   Retorna o raio-x completo da decisão antifraude de uma proposta específica.
 
 
@@ -926,10 +956,11 @@ ALTA PRIORIDADE:
       Hoje o JWT expira em 8h e o usuário precisa logar de novo.
       Implementar refresh token para sessões mais longas.
 
-  [ ] Tela de configuração das regras antifraude com editor visual
-      Hoje as regras são editadas via Swagger ou /regras pelo payload JSON.
-      Uma UI amigável na tela /regras permitiria ao gestor configurar
-      sem precisar de desenvolvedor.
+  [x] Tela de configuração das regras antifraude com editor visual — FEITO.
+      /regras agora é o Centro de Controle do Antifraude: CRUD com drawer
+      lateral e campos dinâmicos por tipo, KPIs, filtros, badges (ATIVA/
+      BLOQUEANTE/SHADOW/CRÍTICA), aba Simulador (roda antifraude.avaliar()
+      sem persistir nada) e painel de histórico/auditoria por regra.
 
 MÉDIA PRIORIDADE:
   [ ] Notificações em tempo real (WebSocket ou Server-Sent Events)

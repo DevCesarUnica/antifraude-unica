@@ -38,6 +38,9 @@ export const getPropostaById = (id: string) =>
 export const getAuditoriaProposta = (id: string) =>
   api.get(`/propostas/${id}/auditoria`).then((r) => r.data);
 
+export const getDebugProposta = (id: string) =>
+  api.get(`/propostas/${id}/debug`).then((r) => r.data);
+
 export const criarProposta = (data: unknown) =>
   api.post("/propostas/", data).then((r) => r.data);
 
@@ -82,6 +85,18 @@ export const atualizarRegra = (id: string, data: unknown) =>
 
 export const desativarRegra = (id: string) =>
   api.delete(`/regras/${id}`).then((r) => r.data);
+
+export const getAuditoriaRegra = (id: string) =>
+  api.get(`/regras/${id}/auditoria`).then((r) => r.data);
+
+export const simularRegra = (data: {
+  cpf_cliente: string;
+  banco?: string;
+  convenio?: string | null;
+  uf_cliente?: string | null;
+  produto?: string | null;
+  valor: number;
+}) => api.post("/regras/simular", data).then((r) => r.data);
 
 // ── Titan ─────────────────────────────────────────────────────────────────────
 
@@ -288,6 +303,20 @@ export const vincularCorretorGrupo = (grupoId: string, corretorId: string) =>
 
 export const desvincularCorretorGrupo = (grupoId: string, corretorId: string) =>
   api.delete(`/grupos/${grupoId}/corretores/${corretorId}`).then((r) => r.data);
+
+// ── Esteiras Comerciais (WebDeck) ───────────────────────────────────────────────
+
+export const getEsteiras = (params?: { ativo?: boolean }) =>
+  api.get("/grupos/esteiras", { params }).then((r) => r.data);
+
+export const getVinculosEsteira = (grupoId: string) =>
+  api.get(`/grupos/${grupoId}/vinculos`).then((r) => r.data);
+
+export const importarEsteirasWebdeck = (file: File) => {
+  const fd = new FormData();
+  fd.append("arquivo", file);
+  return api.post("/grupos/importar-webdeck", fd).then((r) => r.data);
+};
 
 // ── Layouts de Importação ─────────────────────────────────────────────────────
 

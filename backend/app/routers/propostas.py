@@ -26,6 +26,9 @@ def _processar_sync(proposta_id: str):
     """Processa a proposta de forma síncrona (dev sem Celery)."""
     from app.database import SessionLocal
     from app.services.antifraude import MotorAntifraude, ResultadoMotor
+    from app.services.resolver_corretor import resolver_corretor
+    from app.services.limite_corretor_shadow import avaliar_shadow
+    from app.services.propostas_dashboard import determinar_origem
     from app.models import StatusProposta, TipoEvento
     db2 = SessionLocal()
     try:
@@ -36,6 +39,17 @@ def _processar_sync(proposta_id: str):
         p.status = StatusProposta.EM_ANALISE
         audit.registrar(proposta_id, TipoEvento.INICIO_ANALISE)
 
+        # Vínculo corretor (Fase 2) — só vincula automaticamente em confiança
+        # ALTA. Ver ANALISE_VINCULO_CORRETOR_PROPOSTA.md. Não roda de novo se
+        # já tiver corretor_id (evita sobrescrever vínculo manual em reprocessamento).
+        if not p.corretor_id:
+            origem = determinar_origem(p.proposta_id_externo)
+            resolucao = resolver_corretor(db2, origem, p.payload_original)
+            p.corretor_resolucao = resolucao.to_dict()
+            if resolucao.confianca == "ALTA" and resolucao.corretor_id:
+                p.corretor_id = resolucao.corretor_id
+            audit.registrar(proposta_id, TipoEvento.VINCULO_CORRETOR, dados=p.corretor_resolucao)
+
         decisao = MotorAntifraude(db2).avaliar(p)
         p.score_fraude = decisao.score
         p.resultado_motor = decisao.resultado
@@ -44,8 +58,13 @@ def _processar_sync(proposta_id: str):
             "score": decisao.score,
             "motivo_principal": decisao.motivo_principal,
             "flags": decisao.flags,
+            "regras_disparadas": decisao.regras_disparadas,
         }
         audit.registrar(proposta_id, TipoEvento.DECISAO_MOTOR, dados=p.decisao_detalhes)
+
+        # Avaliação informativa LIMITE_CORRETOR (shadow) — nunca influencia
+        # resultado_motor/status, só é exibida no debug/dashboard.
+        p.limite_corretor_shadow = avaliar_shadow(db2, p)
 
         if decisao.resultado == ResultadoMotor.BLOQUEADO:
             p.status = StatusProposta.BLOQUEADA
@@ -263,6 +282,8 @@ def debug_proposta(proposta_id: str, db: Session = Depends(get_db)):
         "tentativas": proposta.tentativas,
         "ultimo_erro": proposta.ultimo_erro,
         "decisao": proposta.decisao_detalhes,
+        "corretor_resolucao": proposta.corretor_resolucao,
+        "limite_corretor_shadow": proposta.limite_corretor_shadow,
         "auditoria": [
             {
                 "evento": e.evento,

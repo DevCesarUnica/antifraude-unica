@@ -255,7 +255,7 @@ export default function RelatoriosPage() {
                     {(corretores as Record<string, unknown>[]).map((c, i) => (
                       <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
                         <td className="px-4 py-2.5 font-semibold" style={{ color: "var(--text-primary)" }}>{String(c.nome)}</td>
-                        <td className="px-4 py-2.5 font-mono" style={{ color: "var(--text-muted)" }}>{String(c.cpf)}</td>
+                        <td className="px-4 py-2.5 font-mono" style={{ color: "var(--text-muted)" }}>{c.cpf ? String(c.cpf) : "—"}</td>
                         <td className="px-4 py-2.5" style={{ color: "var(--text-muted)" }}>{c.email ? String(c.email) : "—"}</td>
                         <td className="px-4 py-2.5" style={{ color: "var(--text-primary)" }}>
                           {Number(c.limite_valor_diario) > 0 ? formatBRL(Number(c.limite_valor_diario)) : "—"}

@@ -68,6 +68,8 @@ def normalizar_proposta(p: Proposta) -> dict:
     status_val = p.status
     status_str = str(status_val.value if hasattr(status_val, "value") else status_val)
 
+    shadow = p.limite_corretor_shadow or {}
+
     return {
         "id":               p.id,
         "ade":              p.proposta_id_externo,
@@ -90,6 +92,9 @@ def normalizar_proposta(p: Proposta) -> dict:
         "resultado_motor":  p.resultado_motor,
         "origem":           determinar_origem(p.proposta_id_externo),
         "tentativas":       p.tentativas,
+        "corretor_esteira":        shadow.get("esteira"),
+        "corretor_limite":         shadow.get("limite"),
+        "limite_corretor_status":  shadow.get("status"),
     }
 
 

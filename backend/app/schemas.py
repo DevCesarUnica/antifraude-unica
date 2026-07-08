@@ -53,6 +53,8 @@ class PropostaOut(BaseModel):
     score_fraude: int | None
     resultado_motor: str | None
     decisao_detalhes: dict | None
+    corretor_resolucao: dict | None = None
+    limite_corretor_shadow: dict | None = None
     tentativas: int
     ultimo_erro: str | None
     criado_em: datetime
@@ -96,6 +98,9 @@ class PropostaDashboardItem(BaseModel):
     resultado_motor: str | None
     origem: str
     tentativas: int
+    corretor_esteira: str | None = None
+    corretor_limite: float | None = None
+    limite_corretor_status: str | None = None
 
 
 class PropostasDashboardResponse(BaseModel):
@@ -114,8 +119,30 @@ class RegraCreate(BaseModel):
     parametros: dict[str, Any]
     peso_score: int = 0
     bloqueante: bool = False
+    shadow_mode: bool = False
     prioridade: int = 100
     ativo: bool = True
+
+    @field_validator("nome")
+    @classmethod
+    def nome_nao_vazio(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Nome é obrigatório")
+        return v.strip()
+
+    @field_validator("peso_score")
+    @classmethod
+    def peso_nao_negativo(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("Peso não pode ser negativo")
+        return v
+
+    @field_validator("prioridade")
+    @classmethod
+    def prioridade_positiva(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("Prioridade deve ser >= 1")
+        return v
 
 
 class RegraUpdate(BaseModel):
@@ -124,8 +151,30 @@ class RegraUpdate(BaseModel):
     parametros: dict[str, Any] | None = None
     peso_score: int | None = None
     bloqueante: bool | None = None
+    shadow_mode: bool | None = None
     prioridade: int | None = None
     ativo: bool | None = None
+
+    @field_validator("nome")
+    @classmethod
+    def nome_nao_vazio(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("Nome não pode ser vazio")
+        return v.strip() if v is not None else v
+
+    @field_validator("peso_score")
+    @classmethod
+    def peso_nao_negativo(cls, v: int | None) -> int | None:
+        if v is not None and v < 0:
+            raise ValueError("Peso não pode ser negativo")
+        return v
+
+    @field_validator("prioridade")
+    @classmethod
+    def prioridade_positiva(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError("Prioridade deve ser >= 1")
+        return v
 
 
 class RegraOut(BaseModel):
@@ -136,13 +185,63 @@ class RegraOut(BaseModel):
     parametros: dict
     peso_score: int
     bloqueante: bool
+    shadow_mode: bool
     prioridade: int
     ativo: bool
     versao: int
+    criado_por: str | None = None
+    atualizado_por: str | None = None
     criado_em: datetime
     atualizado_em: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Simulador de Regras ────────────────────────────────────────────────────────
+# Executa antifraude.avaliar() contra uma proposta transitória (nunca
+# persistida) — usado pela aba "Simulador" da tela /regras.
+
+class SimulacaoRequest(BaseModel):
+    cpf_cliente: str
+    banco: str = "SIMULACAO"
+    convenio: str | None = None
+    uf_cliente: str | None = None
+    produto: str | None = None
+    valor: float
+
+    @field_validator("valor")
+    @classmethod
+    def valor_positivo(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("Valor deve ser positivo")
+        return v
+
+    @field_validator("cpf_cliente")
+    @classmethod
+    def cpf_apenas_digitos(cls, v: str) -> str:
+        digits = v.replace(".", "").replace("-", "").replace("/", "")
+        if not digits.isdigit() or len(digits) not in (11, 14):
+            raise ValueError("CPF/CNPJ inválido")
+        return digits
+
+
+class RegraDisparadaOut(BaseModel):
+    regra_id: str
+    nome: str
+    tipo: str
+    score_contribuicao: int
+    bloqueante: bool
+    motivo: str
+    detalhes: dict
+    efeito: str  # REAL | SHADOW
+
+
+class SimulacaoResponse(BaseModel):
+    resultado: str
+    score: int
+    motivo_principal: str
+    flags: list[str]
+    regras_disparadas: list[RegraDisparadaOut]
 
 
 # ── Blacklist ─────────────────────────────────────────────────────────────────
@@ -230,7 +329,8 @@ class TitanStatusOut(BaseModel):
 
 class CorretorCreate(BaseModel):
     nome: str
-    cpf: str
+    # Opcional: corretores importados do WebDeck não têm CPF, só código interno.
+    cpf: str | None = None
     email: str | None = None
     telefone: str | None = None
     codigo_externo: str | None = None
@@ -251,7 +351,7 @@ class CorretorUpdate(BaseModel):
 class CorretorOut(BaseModel):
     id: str
     nome: str
-    cpf: str
+    cpf: str | None
     email: str | None
     telefone: str | None
     codigo_externo: str | None
@@ -305,6 +405,48 @@ class GrupoOut(BaseModel):
     criado_em: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Esteiras Comerciais (WebDeck) ──────────────────────────────────────────────
+# Camada de leitura sobre GrupoCorretor/Corretor/CorretorEsteira — não são
+# regras antifraude, são cadastro operacional. Ver ANALISE_REGRAS_WEBDECK.md.
+
+class EsteiraResumoOut(BaseModel):
+    id: str
+    nome: str
+    descricao: str | None
+    limite_valor: float
+    metadados: dict | None
+    ativo: bool
+    criado_em: datetime
+    total_corretores: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class EsteiraVinculoOut(BaseModel):
+    corretor_id: str
+    corretor_nome: str
+    codigo_externo: str | None
+    corretor_ativo: bool
+    banco_grupo: str | None
+    data_entrada: datetime | None
+
+
+class ImportEsteirasErro(BaseModel):
+    linha: int
+    erro: str
+
+
+class ImportEsteirasResultado(BaseModel):
+    esteiras_criadas: int
+    esteiras_atualizadas: int
+    corretores_criados: int
+    corretores_atualizados: int
+    vinculos_criados: int
+    vinculos_atualizados: int
+    total_erros: int
+    erros: list[ImportEsteirasErro]
 
 
 # ── Layout de Importação ───────────────────────────────────────────────────────

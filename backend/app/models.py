@@ -53,6 +53,12 @@ class TipoRegra(str, PyEnum):
     UF_BLOQUEADA   = "UF_BLOQUEADA"
     SCORE_RISCO    = "SCORE_RISCO"
     LIMITE_DIARIO  = "LIMITE_DIARIO"
+    # Placeholder para uso futuro — depende da FASE 2 (vínculo corretor×esteira,
+    # ver ANALISE_VINCULO_CORRETOR_PROPOSTA.md). Sem avaliador em antifraude.py
+    # ainda: cadastrar uma regra deste tipo hoje nunca dispara (por design).
+    # Esteiras Comerciais/GrupoCorretor/Corretor são um módulo separado deste
+    # motor — não misturar.
+    LIMITE_CORRETOR_SHADOW = "LIMITE_CORRETOR_SHADOW"
 
 
 class TipoEvento(str, PyEnum):
@@ -65,22 +71,31 @@ class TipoEvento(str, PyEnum):
     ERRO           = "ERRO"
     REPROCESSAMENTO= "REPROCESSAMENTO"
     ALTERACAO_MANUAL = "ALTERACAO_MANUAL"
+    VINCULO_CORRETOR = "VINCULO_CORRETOR"
 
 
 # ── Grupo de Corretores ───────────────────────────────────────────────────────
 
 class GrupoCorretor(Base):
+    """
+    Também referida na tela/documentação como "esteira comercial" — grão
+    original do relatório do WebDeck (ver ANALISE_REGRAS_WEBDECK.md).
+    """
     __tablename__ = "grupos_corretores"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     nome: Mapped[str] = mapped_column(String(200), unique=True, nullable=False, index=True)
     descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
     limite_valor: Mapped[float] = mapped_column(Float, default=0.0)
+    # Dados de referência extraídos do nome original (banco/convênio/produto,
+    # tags "grupos_webdeck" etc.) — não são FKs, apenas contexto para a tela.
+    metadados: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     corretores = relationship("Corretor", back_populates="grupo")
+    vinculos = relationship("CorretorEsteira", back_populates="grupo", cascade="all, delete-orphan")
 
 
 # ── Corretor ─────────────────────────────────────────────────────────────────
@@ -90,7 +105,9 @@ class Corretor(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     nome: Mapped[str] = mapped_column(String(200), nullable=False)
-    cpf: Mapped[str] = mapped_column(String(14), unique=True, nullable=False, index=True)
+    # Nullable: corretores importados do WebDeck (relatorio_regras.csv) só têm
+    # código interno + nome, sem CPF — ver ANALISE_REGRAS_WEBDECK.md seção 2.
+    cpf: Mapped[str | None] = mapped_column(String(14), unique=True, nullable=True, index=True)
     email: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     telefone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     codigo_externo: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
@@ -104,6 +121,38 @@ class Corretor(Base):
     grupo = relationship("GrupoCorretor", back_populates="corretores")
     propostas = relationship("Proposta", back_populates="corretor")
     contatos = relationship("ContatoCorretor", back_populates="corretor", cascade="all, delete-orphan")
+    esteiras = relationship("CorretorEsteira", back_populates="corretor", cascade="all, delete-orphan")
+
+
+# ── Vínculo Corretor × Esteira Comercial (WebDeck) ────────────────────────────
+
+class CorretorEsteira(Base):
+    """
+    Vínculo N:N entre corretor e esteira comercial (GrupoCorretor).
+
+    Um corretor pode pertencer a mais de uma esteira ao mesmo tempo (ex: mesma
+    faixa de valor em bancos diferentes) — comportamento observado nos dados
+    reais do WebDeck, ver ANALISE_REGRAS_WEBDECK.md seção 2. `Corretor.grupo_id`
+    continua apontando para a esteira "principal" (a de `data_entrada` mais
+    recente), que é a candidata a alimentar uma futura regra de limite por
+    corretor (LIMITE_CORRETOR, em modo shadow — não implementada ainda).
+    """
+    __tablename__ = "corretor_esteiras"
+    __table_args__ = (
+        UniqueConstraint("corretor_id", "grupo_id", name="uq_corretor_esteira"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    corretor_id: Mapped[str] = mapped_column(String(36), ForeignKey("corretores.id"), nullable=False, index=True)
+    grupo_id: Mapped[str] = mapped_column(String(36), ForeignKey("grupos_corretores.id"), nullable=False, index=True)
+    # "Nome Grupo" bruto do WebDeck quando especializa por banco (ex: "BMG", "C6")
+    banco_grupo: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # "Data de entrada" do relatório WebDeck (sem timezone confirmado — tratada como referência, não como UTC real)
+    data_entrada: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    corretor = relationship("Corretor", back_populates="esteiras")
+    grupo = relationship("GrupoCorretor", back_populates="vinculos")
 
 
 # ── Contato de Corretor ───────────────────────────────────────────────────────
@@ -162,6 +211,14 @@ class Proposta(Base):
     resultado_motor: Mapped[str | None] = mapped_column(String(20), nullable=True)
     decisao_detalhes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # Vínculo corretor (Fase 2 — ver ANALISE_VINCULO_CORRETOR_PROPOSTA.md).
+    # Registra COMO corretor_id foi (ou não foi) preenchido — nunca influencia
+    # o motor, só alimenta auditoria e o modo debug.
+    corretor_resolucao: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Avaliação informativa de LIMITE_CORRETOR contra a esteira do corretor.
+    # Sempre "efeito": "SHADOW" nesta fase — nunca bloqueia nem soma score.
+    limite_corretor_shadow: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Dados brutos da proposta (flexível)
     payload_original: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
@@ -197,9 +254,17 @@ class RegraAntifraude(Base):
     peso_score: Mapped[int] = mapped_column(Integer, default=0)
     # Se True, bloqueia imediatamente (resultado=BLOQUEADO)
     bloqueante: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Se True, a regra é avaliada e registrada (regras_disparadas com
+    # efeito="SHADOW") mas NUNCA soma score nem bloqueia — modo de observação
+    # antes de promover a regra para produção real.
+    shadow_mode: Mapped[bool] = mapped_column(Boolean, default=False)
     prioridade: Mapped[int] = mapped_column(Integer, default=100)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     versao: Mapped[int] = mapped_column(Integer, default=1)
+    # Denormalizado para exibição/filtro rápido na tela — o histórico completo
+    # de alterações mora em logs_auditoria (tipo_entidade="regra_antifraude").
+    criado_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    atualizado_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 

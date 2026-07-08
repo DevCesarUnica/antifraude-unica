@@ -8,6 +8,7 @@ import UsuariosPage from "./pages/UsuariosPage";
 import StormPage from "./pages/StormPage";
 import CorretoresPage from "./pages/CorretoresPage";
 import GruposPage from "./pages/GruposPage";
+import EsteirasPage from "./pages/EsteirasPage";
 import ImportacoesPage from "./pages/ImportacoesPage";
 import PendenciasPage from "./pages/PendenciasPage";
 import LogsPage from "./pages/LogsPage";
@@ -32,6 +33,7 @@ export default function App() {
       <Route path="/storm"       element={<PrivateRoute><StormPage /></PrivateRoute>} />
       <Route path="/corretores"  element={<PrivateRoute><CorretoresPage /></PrivateRoute>} />
       <Route path="/grupos"      element={<PrivateRoute><GruposPage /></PrivateRoute>} />
+      <Route path="/esteiras"    element={<PrivateRoute><EsteirasPage /></PrivateRoute>} />
       <Route path="/importacoes" element={<PrivateRoute><ImportacoesPage /></PrivateRoute>} />
       <Route path="/pendencias"  element={<PrivateRoute><PendenciasPage /></PrivateRoute>} />
       <Route path="/logs"        element={<PrivateRoute><LogsPage /></PrivateRoute>} />

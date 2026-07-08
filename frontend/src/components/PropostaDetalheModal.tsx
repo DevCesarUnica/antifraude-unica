@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
-  getAuditoriaProposta,
+  getDebugProposta,
   aprovarProposta,
   bloquearProposta,
   reprocessarProposta,
@@ -33,6 +33,9 @@ export interface PropostaDashboard {
   resultado_motor: string | null;
   origem: string;
   tentativas: number;
+  corretor_esteira?: string | null;
+  corretor_limite?: number | null;
+  limite_corretor_status?: string | null;
 }
 
 export interface AuditoriaItem {
@@ -40,6 +43,30 @@ export interface AuditoriaItem {
   dados: Record<string, unknown>;
   usuario: string | null;
   timestamp: string;
+}
+
+interface RegraDisparada {
+  regra_id: string;
+  nome: string;
+  tipo: string;
+  score_contribuicao: number;
+  bloqueante: boolean;
+  motivo: string;
+  detalhes: Record<string, unknown>;
+  efeito: "REAL" | "SHADOW";
+}
+
+interface DebugProposta {
+  decisao: {
+    resultado?: string;
+    score?: number;
+    motivo_principal?: string;
+    flags?: string[];
+    regras_disparadas?: RegraDisparada[];
+  } | null;
+  corretor_resolucao: Record<string, unknown> | null;
+  limite_corretor_shadow: Record<string, unknown> | null;
+  auditoria: AuditoriaItem[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -117,6 +144,21 @@ function OrigemChip({ origem }: { origem: string }) {
   );
 }
 
+function LimiteCorretorBadge({ status }: { status: string }) {
+  const dentro = status === "DENTRO_LIMITE";
+  return (
+    <span
+      className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide whitespace-nowrap"
+      style={{
+        backgroundColor: dentro ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+        color: dentro ? "#22c55e" : "#ef4444",
+      }}
+    >
+      {dentro ? "Dentro da faixa" : "Acima da faixa"}
+    </span>
+  );
+}
+
 function Campo({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -145,11 +187,15 @@ export default function PropostaDetalheModal({
   onReprocessar,
   onEnviarBanco,
 }: Props) {
-  const [auditoria, setAuditoria] = useState<AuditoriaItem[]>([]);
+  const [debug, setDebug] = useState<DebugProposta | null>(null);
   const [loadingAudit, setLoadingAudit] = useState(false);
+  const [verAvaliacaoCompleta, setVerAvaliacaoCompleta] = useState(false);
   const [acao, setAcao] = useState<"aprovar" | "bloquear" | "reprocessar" | "enviar_banco" | null>(null);
   const [loadingAcao, setLoadingAcao] = useState(false);
   const [msgAcao, setMsgAcao] = useState("");
+
+  const auditoria = debug?.auditoria ?? [];
+  const regrasDisparadas = debug?.decisao?.regras_disparadas ?? [];
 
   const defaultAprovar     = (): Promise<void> => aprovarProposta(proposta.id).then(() => {});
   const defaultBloquear    = (): Promise<void> => bloquearProposta(proposta.id).then(() => {});
@@ -158,9 +204,9 @@ export default function PropostaDetalheModal({
 
   useEffect(() => {
     setLoadingAudit(true);
-    getAuditoriaProposta(proposta.id)
-      .then((d: AuditoriaItem[]) => setAuditoria(d ?? []))
-      .catch(() => setAuditoria([]))
+    getDebugProposta(proposta.id)
+      .then((d: DebugProposta) => setDebug(d))
+      .catch(() => setDebug(null))
       .finally(() => setLoadingAudit(false));
   }, [proposta.id]);
 
@@ -237,6 +283,76 @@ export default function PropostaDetalheModal({
               <Campo label="Arquivos">{proposta.possui_arquivos ? "✓ Sim" : "Não"}</Campo>
             </div>
           </section>
+
+          {/* Corretor & Esteira (shadow — informativo, não bloqueia) */}
+          {proposta.corretor_esteira && (
+            <section>
+              <p className="text-[10px] font-black uppercase tracking-widest mb-3" style={{ color: "#DC2626" }}>
+                Corretor & Esteira <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>(shadow — informativo)</span>
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3">
+                <Campo label="Corretor">{safe(proposta.corretor)}</Campo>
+                <Campo label="Esteira">{safe(proposta.corretor_esteira)}</Campo>
+                <Campo label="Limite">{proposta.corretor_limite != null ? fmtBRL(proposta.corretor_limite) : "—"}</Campo>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: "var(--text-muted)" }}>Status</p>
+                  {proposta.limite_corretor_status ? <LimiteCorretorBadge status={proposta.limite_corretor_status} /> : "—"}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Regras disparadas — integração motor antifraude ↔ propostas */}
+          {regrasDisparadas.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: "#DC2626" }}>
+                  Regras Disparadas ({regrasDisparadas.length})
+                </p>
+                <button
+                  onClick={() => setVerAvaliacaoCompleta((v) => !v)}
+                  className="text-[10px] font-bold px-2 py-1 rounded"
+                  style={{ backgroundColor: "rgba(96,165,250,0.1)", color: "#60a5fa" }}
+                >
+                  {verAvaliacaoCompleta ? "Ocultar detalhes" : "Ver Avaliação Completa"}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {regrasDisparadas.map((r) => (
+                  <div key={r.regra_id} className="rounded-lg p-3" style={{ backgroundColor: "var(--bg-mid)", border: "1px solid var(--border)" }}>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>{r.nome}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase"
+                          style={{
+                            backgroundColor: r.efeito === "SHADOW" ? "rgba(168,85,247,0.15)" : "rgba(96,165,250,0.15)",
+                            color: r.efeito === "SHADOW" ? "#a855f7" : "#60a5fa",
+                          }}
+                        >
+                          {r.efeito === "SHADOW" ? "Shadow" : "Real"}
+                        </span>
+                        {r.bloqueante && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase" style={{ backgroundColor: "rgba(239,68,68,0.15)", color: "#ef4444" }}>
+                            Bloqueante
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+                      {r.tipo} · impacto no score: +{r.score_contribuicao}
+                    </p>
+                    <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>{r.motivo}</p>
+                    {verAvaliacaoCompleta && (
+                      <pre className="text-[9px] mt-2 overflow-x-auto p-2 rounded" style={{ backgroundColor: "var(--bg-subtle)", color: "var(--text-muted)" }}>
+                        {JSON.stringify(r.detalhes, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Datas */}
           <section>

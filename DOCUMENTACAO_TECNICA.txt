@@ -331,7 +331,10 @@ TABELA: contatos_corretores
 
 TABELA: regras_antifraude
   id, nome, descricao, tipo (TipoRegra enum), parametros (JSONB)
-  peso_score, bloqueante (bool), prioridade (int), ativo, versao, criado_em
+  peso_score, bloqueante (bool), shadow_mode (bool), prioridade (int)
+  ativo, versao, criado_por, atualizado_por, criado_em, atualizado_em
+  Histórico completo de alterações fica em logs_auditoria
+  (tipo_entidade="regra_antifraude"), não em colunas próprias.
 
 TABELA: blacklist
   id, tipo (TipoBlacklist enum), valor, motivo, fonte, adicionado_por
@@ -572,10 +575,19 @@ MODO DEV (sem Celery/Redis):
   4.9  routers/regras.py
 --------------------------------------------------------------------------------
 
-GET    /regras/        ?ativo=true    Lista regras
-POST   /regras/                       Cria regra (RegraCreate)
-PATCH  /regras/{id}                   Atualiza parcialmente (RegraUpdate)
-DELETE /regras/{id}                   Desativa (soft delete, ativo=False)
+GET    /regras/                ?ativo=true    Lista regras (público)
+POST   /regras/                               Cria regra (admin/gestor) — RegraCreate
+GET    /regras/{id}                           Obtém uma regra (público)
+GET    /regras/{id}/auditoria                 Histórico completo (logs_auditoria) desta regra
+PATCH  /regras/{id}                           Atualiza parcialmente (admin/gestor) — RegraUpdate
+DELETE /regras/{id}                           Desativa (admin/gestor, soft delete, ativo=False)
+POST   /regras/simular                        Simulador — roda antifraude.avaliar() contra uma
+                                               proposta transitória (nunca persistida, sem commit)
+
+Toda mutação (criar/atualizar/desativar) grava em logs_auditoria
+(tipo_entidade="regra_antifraude", risco="ALTO") com snapshot antes/depois
+via log_auditoria() — mesma infraestrutura usada pelo resto do sistema.
+RegraAntifraude ganhou shadow_mode, criado_por, atualizado_por (ver seção 4.26).
 
 
 --------------------------------------------------------------------------------
@@ -885,31 +897,45 @@ NORMALIZAÇÃO DE RESPOSTAS:
 Avalia cada proposta contra todas as regras ativas.
 
 COMPORTAMENTO (CRÍTICO — nunca aprovar automaticamente):
-  score >= 80 OU regra bloqueante → resultado = BLOQUEADO → status BLOQUEADA
-  todos os outros casos           → resultado = MANUAL → status ANALISE_MANUAL
+  score >= 80 OU regra bloqueante (fora de shadow) → BLOQUEADO → BLOQUEADA
+  todos os outros casos                            → MANUAL → ANALISE_MANUAL
   NUNCA gera status APROVADA automaticamente.
 
 THRESHOLDS:
   SCORE_MANUAL   = 40  (score >= 40: aviso "risco elevado" no motivo)
   SCORE_BLOQUEIO = 80  (score >= 80: BLOQUEADO automático)
 
+SHADOW MODE (regras_antifraude.shadow_mode — FASE "Centro de Controle"):
+  Regra com shadow_mode=True é avaliada e aparece em regras_disparadas
+  (efeito="SHADOW"), mas NUNCA soma score_acumulado nem bloqueia — mesmo
+  que bloqueante=True. Serve para observar o comportamento de uma regra
+  nova (ex: fruto de LIMITE_CORRETOR_SHADOW) antes de promovê-la. Regras
+  reais continuam com efeito="REAL" e o comportamento de sempre.
+
 AUTO-MAPEAMENTO DE CONVÊNIOS:
   Antes de avaliar, _auto_mapear_convenio() cria o convênio em convenios
   se não existir (auto_registrado=True). Elimina status "NAO_MAPEADA".
 
 TIPOS DE REGRA E PARÂMETROS (parametros é JSONB):
-  BLACKLIST      → consulta tabela blacklist pelo CPF do cliente
-  VALOR_MAXIMO   → valor > params["valor_maximo"]
-  BANCO_CONVENIO → (banco, convenio) em params["combinacoes"] [[b,c], ...]
-  UF_BLOQUEADA   → uf_cliente em params["ufs"] ["SP", "RJ", ...]
-  SCORE_RISCO    → score composto por vários fatores configuráveis
-  LIMITE_DIARIO  → soma diária do corretor > params["limite_valor_diario"]
+  BLACKLIST              → consulta tabela blacklist pelo CPF do cliente
+  VALOR_MAXIMO           → valor > params["valor_maximo"]
+  BANCO_CONVENIO         → (banco, convenio) em params["combinacoes"] [[b,c], ...]
+  UF_BLOQUEADA           → uf_cliente em params["ufs"] ["SP", "RJ", ...]
+  SCORE_RISCO            → score composto por vários fatores configuráveis
+  LIMITE_DIARIO          → soma diária do corretor > params["limite_valor_diario"]
+  LIMITE_CORRETOR_SHADOW → placeholder no enum, SEM avaliador implementado
+                           ainda (depende do vínculo Corretor×Esteira da Fase 2,
+                           ver ANALISE_VINCULO_CORRETOR_PROPOSTA.md). Uma regra
+                           deste tipo é aceita pelo CRUD mas nunca dispara hoje.
+                           NÃO confundir com Esteiras Comerciais — módulo à parte.
 
 SAÍDA SALVA NA PROPOSTA:
   score_fraude     : int 0–100
   resultado_motor  : "BLOQUEADO" | "MANUAL"
   decisao_detalhes : {
-    resultado, score, motivo_principal, flags: [regras disparadas]
+    resultado, score, motivo_principal, flags: [regras REAL disparadas],
+    regras_disparadas: [{regra_id, nome, tipo, score_contribuicao,
+                         bloqueante, motivo, detalhes, efeito: REAL|SHADOW}]
   }
 
 
@@ -1273,9 +1299,36 @@ Atualização automática a cada 8s.
   5.15 pages/RegrasPage.tsx
 --------------------------------------------------------------------------------
 
-CRUD de regras antifraude. Lista ativas/inativas, criar, editar, desativar.
-Tipos: BLACKLIST, VALOR_MAXIMO, BANCO_CONVENIO, UF_BLOQUEADA, SCORE_RISCO,
-       LIMITE_DIARIO.
+Centro de Controle do Antifraude — CRUD completo + auditoria + simulador.
+NÃO confundir com Esteiras Comerciais (EsteirasPage.tsx/grupos_corretores) —
+módulos independentes, sem tabelas ou dados compartilhados.
+
+Tipos suportados: BLACKLIST, VALOR_MAXIMO, BANCO_CONVENIO, UF_BLOQUEADA,
+  SCORE_RISCO, LIMITE_DIARIO (com campos dinâmicos por tipo + modo avançado
+  JSON com validação). LIMITE_CORRETOR_SHADOW aparece no seletor marcado
+  "(em breve)" — aceito pelo schema, sem avaliador no motor ainda.
+
+ABA "Regras":
+  KPIs: Total, Ativas, Bloqueantes (fora de shadow), Em Shadow Mode,
+  Última Alteração. Filtros: busca, tipo, ativa/inativa, bloqueante,
+  shadow mode, criador. Badges: ATIVA/INATIVA, BLOQUEANTE, SHADOW, CRÍTICA
+  (bloqueante + peso_score >= 80, fora de shadow).
+  Drawer lateral "Nova/Editar Regra" com validação (nome obrigatório,
+  peso/prioridade não-negativos, JSON válido no modo avançado) e toggle
+  Shadow Mode (aviso quando bloqueante+shadow coexistem).
+  Drawer "Histórico da regra": consome GET /regras/{id}/auditoria
+  (logs_auditoria) — quem criou/editou, quando, antes/depois.
+
+ABA "Simulador":
+  Formulário (CPF fictício, banco, convênio, UF, produto, valor) →
+  POST /regras/simular → mostra resultado, score, motivo e a lista completa
+  de regras_disparadas (nome, tipo, impacto no score, efeito REAL/SHADOW,
+  motivo). Não persiste nada — mesmo motor de produção (antifraude.avaliar).
+
+INTEGRAÇÃO COM PROPOSTAS:
+  PropostaDetalheModal busca GET /propostas/{id}/debug e mostra a seção
+  "Regras Disparadas" (nome, tipo, efeito REAL/SHADOW, impacto no score,
+  motivo) com toggle "Ver Avaliação Completa" (detalhes brutos por regra).
 
 
 --------------------------------------------------------------------------------

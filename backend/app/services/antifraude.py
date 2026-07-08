@@ -73,34 +73,51 @@ class MotorAntifraude:
         for regra in regras:
             resultado = self._avaliar_regra(proposta, regra)
 
-            if resultado.disparou:
-                flags.append(regra.nome)
-                regras_disparadas.append({
-                    "regra_id": regra.id,
-                    "nome": regra.nome,
-                    "tipo": regra.tipo,
-                    "score_contribuicao": resultado.score_contribuicao,
-                    "bloqueante": resultado.bloqueante,
-                    "motivo": resultado.motivo,
-                    "detalhes": resultado.detalhes,
-                })
+            if not resultado.disparou:
+                continue
 
-                if resultado.bloqueante:
-                    log.warning(
-                        "motor.bloqueio",
-                        proposta_id=proposta.id,
-                        regra=regra.nome,
-                        motivo=resultado.motivo,
-                    )
-                    return Decisao(
-                        resultado=ResultadoMotor.BLOQUEADO,
-                        score=100,
-                        motivo_principal=resultado.motivo,
-                        flags=flags,
-                        regras_disparadas=regras_disparadas,
-                    )
+            # Modo shadow (por regra): avalia e registra, mas nunca soma score
+            # nem bloqueia. Serve para observar o comportamento de uma regra
+            # nova antes de promovê-la para produção real.
+            efeito = "SHADOW" if regra.shadow_mode else "REAL"
+            regras_disparadas.append({
+                "regra_id": regra.id,
+                "nome": regra.nome,
+                "tipo": regra.tipo,
+                "score_contribuicao": resultado.score_contribuicao,
+                "bloqueante": resultado.bloqueante,
+                "motivo": resultado.motivo,
+                "detalhes": resultado.detalhes,
+                "efeito": efeito,
+            })
 
-                score_acumulado = min(score_acumulado + resultado.score_contribuicao, 100)
+            if regra.shadow_mode:
+                log.info(
+                    "motor.shadow_disparo",
+                    proposta_id=proposta.id,
+                    regra=regra.nome,
+                    motivo=resultado.motivo,
+                )
+                continue
+
+            flags.append(regra.nome)
+
+            if resultado.bloqueante:
+                log.warning(
+                    "motor.bloqueio",
+                    proposta_id=proposta.id,
+                    regra=regra.nome,
+                    motivo=resultado.motivo,
+                )
+                return Decisao(
+                    resultado=ResultadoMotor.BLOQUEADO,
+                    score=100,
+                    motivo_principal=resultado.motivo,
+                    flags=flags,
+                    regras_disparadas=regras_disparadas,
+                )
+
+            score_acumulado = min(score_acumulado + resultado.score_contribuicao, 100)
 
         # Decisão por score acumulado.
         # O motor NUNCA aprova automaticamente — a aprovação final é sempre humana.

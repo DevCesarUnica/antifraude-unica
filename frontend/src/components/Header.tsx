@@ -22,6 +22,7 @@ const NAV_GRUPOS: NavGroup[] = [
     items: [
       { to: "/corretores",  label: "Corretores",  desc: "Cadastro e gestão de corretores" },
       { to: "/grupos",      label: "Grupos",       desc: "Grupos de corretores e limites" },
+      { to: "/esteiras",    label: "Esteiras Comerciais", desc: "Faixas de limite importadas do WebDeck" },
       { to: "/importacoes", label: "Importações", desc: "Importação CSV e mapeamento de layout" },
     ],
   },

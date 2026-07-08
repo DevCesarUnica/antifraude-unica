@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import Header from "../components/Header";
-import { getPendencias, criarPendencia, resolverPendencia, atualizarPendencia } from "../lib/api";
+import { getPendencias, getResumoPendencias, criarPendencia, resolverPendencia, atualizarPendencia } from "../lib/api";
+
+interface ResumoPendencias { abertas: number; resolvidas: number; total: number; taxa_resolucao: number; }
 
 interface Pendencia {
   id: string; proposta_id: string | null; tipo: string; descricao: string;
@@ -14,6 +16,7 @@ const EMPTY = { proposta_id: "", tipo: "DOCUMENTO", descricao: "", responsavel_i
 
 export default function PendenciasPage() {
   const [pendencias, setPendencias] = useState<Pendencia[]>([]);
+  const [resumo, setResumo] = useState<ResumoPendencias | null>(null);
   const [loading, setLoading] = useState(true);
   const [filtroResolvida, setFiltroResolvida] = useState<string>("false");
   const [filtroTipo, setFiltroTipo] = useState("");
@@ -30,6 +33,7 @@ export default function PendenciasPage() {
         resolvida: filtroResolvida !== "" ? filtroResolvida === "true" : undefined,
         tipo: filtroTipo || undefined,
       }));
+      setResumo(await getResumoPendencias());
     } finally { setLoading(false); }
   };
 
@@ -85,6 +89,28 @@ export default function PendenciasPage() {
             + Nova Pendência
           </button>
         </div>
+
+        {/* KPIs gerais */}
+        {resumo && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <div className="rounded-xl p-4" style={{ backgroundColor: "#F59E0B", color: "white" }}>
+              <p className="text-2xl font-black">{resumo.abertas}</p>
+              <p className="text-xs font-bold mt-1">Pendências em Aberto</p>
+            </div>
+            <div className="rounded-xl p-4" style={{ backgroundColor: "#22C55E", color: "white" }}>
+              <p className="text-2xl font-black">{resumo.resolvidas}</p>
+              <p className="text-xs font-bold mt-1">Pendências Resolvidas</p>
+            </div>
+            <div className="rounded-xl p-4" style={{ backgroundColor: "#3B82F6", color: "white" }}>
+              <p className="text-2xl font-black">{resumo.total}</p>
+              <p className="text-xs font-bold mt-1">Total de Pendências</p>
+            </div>
+            <div className="rounded-xl p-4" style={{ backgroundColor: "#8B5CF6", color: "white" }}>
+              <p className="text-2xl font-black">{resumo.taxa_resolucao}%</p>
+              <p className="text-xs font-bold mt-1">Taxa de Resolução</p>
+            </div>
+          </div>
+        )}
 
         {/* KPIs por tipo */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">

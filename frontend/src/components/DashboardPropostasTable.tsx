@@ -458,6 +458,9 @@ export default function DashboardPropostasTable() {
   const [orderDir, setOrderDir] = useState<"asc" | "desc">("desc");
 
   const [modalProposta, setModalProposta] = useState<PropostaDashboard | null>(null);
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [executandoLote, setExecutandoLote] = useState(false);
+  const [msgLote, setMsgLote] = useState("");
 
   const carregar = useCallback(async (s: number) => {
     setLoading(true); setErro("");
@@ -481,6 +484,7 @@ export default function DashboardPropostasTable() {
       const res: DashboardResponse = await getPropostasDashboard(params as Parameters<typeof getPropostasDashboard>[0]);
       setData(res);
       setSkip(s);
+      setSelecionados(new Set());
     } catch {
       setErro("Erro ao carregar propostas. Tente novamente.");
     } finally { setLoading(false); }
@@ -506,6 +510,41 @@ export default function DashboardPropostasTable() {
     if (!modalProposta) return;
     await fn(modalProposta.id);
     setModalProposta(null);
+    carregar(skip);
+  };
+
+  const toggleSelecionado = (id: string) => {
+    setSelecionados((prev) => {
+      const novo = new Set(prev);
+      if (novo.has(id)) novo.delete(id); else novo.add(id);
+      return novo;
+    });
+  };
+
+  const idsPagina = data?.items.map((p) => p.id) ?? [];
+  const todosSelecionados = idsPagina.length > 0 && idsPagina.every((id) => selecionados.has(id));
+
+  const toggleTodos = () => {
+    setSelecionados((prev) => {
+      if (todosSelecionados) return new Set();
+      return new Set(idsPagina);
+    });
+  };
+
+  const executarLote = async (fn: (id: string) => Promise<unknown>, rotulo: string) => {
+    const ids = Array.from(selecionados);
+    if (ids.length === 0) return;
+    setExecutandoLote(true); setMsgLote("");
+    const resultados = await Promise.allSettled(ids.map((id) => fn(id)));
+    const sucesso = resultados.filter((r) => r.status === "fulfilled").length;
+    const falha = resultados.length - sucesso;
+    setMsgLote(
+      falha === 0
+        ? `${sucesso} proposta(s) ${rotulo} com sucesso.`
+        : `${sucesso} proposta(s) ${rotulo}, ${falha} falharam (status inválido para a ação).`
+    );
+    setExecutandoLote(false);
+    setSelecionados(new Set());
     carregar(skip);
   };
 
@@ -590,6 +629,43 @@ export default function DashboardPropostasTable() {
         )}
       </div>
 
+      {/* ── Ação em lote ────────────────────────────────────────────── */}
+      {selecionados.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl" style={{ backgroundColor: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)" }}>
+          <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>
+            {selecionados.size} selecionada{selecionados.size > 1 ? "s" : ""}
+          </span>
+          <button
+            disabled={executandoLote}
+            onClick={() => executarLote(aprovarProposta, "aprovada(s)")}
+            className="px-3 py-1 rounded-lg text-[10px] font-bold text-white disabled:opacity-50"
+            style={{ backgroundColor: "#16a34a" }}
+          >
+            ✓ Aprovar selecionadas
+          </button>
+          <button
+            disabled={executandoLote}
+            onClick={() => executarLote(bloquearProposta, "bloqueada(s)")}
+            className="px-3 py-1 rounded-lg text-[10px] font-bold text-white disabled:opacity-50"
+            style={{ backgroundColor: "#DC2626" }}
+          >
+            ✕ Bloquear selecionadas
+          </button>
+          <button
+            onClick={() => setSelecionados(new Set())}
+            className="text-[10px] font-semibold ml-auto"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Limpar seleção
+          </button>
+        </div>
+      )}
+      {msgLote && (
+        <p className="text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "rgba(96,165,250,0.08)", color: "#60a5fa", border: "1px solid rgba(96,165,250,0.2)" }}>
+          {msgLote}
+        </p>
+      )}
+
       {/* ── Erro ────────────────────────────────────────────────────── */}
       {erro && (
         <p className="text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "rgba(239,68,68,0.08)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)" }}>
@@ -603,6 +679,9 @@ export default function DashboardPropostasTable() {
           <table className="w-full text-xs" style={{ minWidth: 1200 }}>
             <thead>
               <tr style={{ backgroundColor: "var(--bg-mid)", borderBottom: "2px solid var(--border)" }}>
+                <th className="px-3 py-2.5 text-left">
+                  <input type="checkbox" checked={todosSelecionados} onChange={toggleTodos} disabled={idsPagina.length === 0} />
+                </th>
                 <ColHeader label="Proposta (ADE)" col="ade"           orderBy={orderBy} orderDir={orderDir} onSort={handleSort} infoKey="ade" />
                 <th className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
                   <span className="inline-flex items-center gap-1.5">Arq. <ColInfoButton colKey="arq" /></span>
@@ -638,10 +717,10 @@ export default function DashboardPropostasTable() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={15} className="text-center py-12 text-sm" style={{ color: "var(--text-muted)" }}>Carregando propostas...</td></tr>
+                <tr><td colSpan={16} className="text-center py-12 text-sm" style={{ color: "var(--text-muted)" }}>Carregando propostas...</td></tr>
               )}
               {!loading && (!data || data.items.length === 0) && (
-                <tr><td colSpan={15} className="text-center py-12 text-sm" style={{ color: "var(--text-muted)" }}>
+                <tr><td colSpan={16} className="text-center py-12 text-sm" style={{ color: "var(--text-muted)" }}>
                   {temFiltro ? "Nenhuma proposta encontrada para os filtros." : "Nenhuma proposta cadastrada."}
                 </td></tr>
               )}
@@ -653,6 +732,10 @@ export default function DashboardPropostasTable() {
                     borderBottom: "1px solid var(--border-mid)",
                   }}
                 >
+                  {/* Seleção */}
+                  <td className="px-3 py-2.5">
+                    <input type="checkbox" checked={selecionados.has(p.id)} onChange={() => toggleSelecionado(p.id)} />
+                  </td>
                   {/* Proposta ADE */}
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1.5">

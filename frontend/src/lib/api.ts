@@ -389,6 +389,9 @@ export const processarRetornoBanco = (id: string) =>
 export const getPendencias = (params?: { tipo?: string; resolvida?: boolean; proposta_id?: string }) =>
   api.get("/pendencias/", { params }).then((r) => r.data);
 
+export const getResumoPendencias = () =>
+  api.get("/pendencias/summary").then((r) => r.data);
+
 export const criarPendencia = (data: unknown) =>
   api.post("/pendencias/", data).then((r) => r.data);
 

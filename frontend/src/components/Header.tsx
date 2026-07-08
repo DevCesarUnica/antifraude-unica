@@ -14,6 +14,7 @@ const NAV_GRUPOS: NavGroup[] = [
     items: [
       { to: "/propostas",   label: "Propostas",   desc: "Análise e gestão de propostas de crédito" },
       { to: "/pendencias",  label: "Pendências",  desc: "Painel de pendências e alertas operacionais" },
+      { to: "/retornos-banco", label: "Retornos de Banco", desc: "Respostas dos bancos sobre propostas" },
       { to: "/bancos",      label: "Bancos",       desc: "Integrações e retornos bancários" },
     ],
   },

@@ -8,9 +8,19 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Pendencia
-from app.schemas import PendenciaCreate, PendenciaUpdate, PendenciaOut, Mensagem
+from app.schemas import PendenciaCreate, PendenciaUpdate, PendenciaOut, PendenciaSummary, Mensagem
 
 router = APIRouter(prefix="/pendencias", tags=["pendencias"])
+
+
+# Rota estática — precisa vir antes de /{pendencia_id} (FastAPI casa por ordem de declaração).
+@router.get("/summary", response_model=PendenciaSummary)
+def resumo_pendencias(db: Session = Depends(get_db)):
+    total = db.query(Pendencia).count()
+    resolvidas = db.query(Pendencia).filter(Pendencia.resolvida == True).count()  # noqa: E712
+    abertas = total - resolvidas
+    taxa = (resolvidas / total * 100) if total > 0 else 0.0
+    return PendenciaSummary(abertas=abertas, resolvidas=resolvidas, total=total, taxa_resolucao=round(taxa, 1))
 
 
 @router.get("/", response_model=list[PendenciaOut])

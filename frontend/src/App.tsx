@@ -11,6 +11,7 @@ import GruposPage from "./pages/GruposPage";
 import EsteirasPage from "./pages/EsteirasPage";
 import ImportacoesPage from "./pages/ImportacoesPage";
 import PendenciasPage from "./pages/PendenciasPage";
+import RetornosBancoPage from "./pages/RetornosBancoPage";
 import LogsPage from "./pages/LogsPage";
 import RelatoriosPage from "./pages/RelatoriosPage";
 import BlacklistPage from "./pages/BlacklistPage";
@@ -36,6 +37,7 @@ export default function App() {
       <Route path="/esteiras"    element={<PrivateRoute><EsteirasPage /></PrivateRoute>} />
       <Route path="/importacoes" element={<PrivateRoute><ImportacoesPage /></PrivateRoute>} />
       <Route path="/pendencias"  element={<PrivateRoute><PendenciasPage /></PrivateRoute>} />
+      <Route path="/retornos-banco" element={<PrivateRoute><RetornosBancoPage /></PrivateRoute>} />
       <Route path="/logs"        element={<PrivateRoute><LogsPage /></PrivateRoute>} />
       <Route path="/relatorios"  element={<PrivateRoute><RelatoriosPage /></PrivateRoute>} />
       <Route path="/blacklist"   element={<PrivateRoute><BlacklistPage /></PrivateRoute>} />

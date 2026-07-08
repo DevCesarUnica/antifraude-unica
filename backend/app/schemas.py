@@ -74,6 +74,10 @@ class PropostaSummary(BaseModel):
     enviadas_banco: int
     confirmadas_banco: int
     erro: int
+    # Soma de Proposta.valor por status — permite os cards do dashboard
+    # mostrarem "N propostas / R$ X", como na Mesa de Crédito do WebDeck.
+    valor_total: float = 0.0
+    valores_por_status: dict[str, float] = {}
 
 
 class PropostaDashboardItem(BaseModel):
@@ -607,6 +611,13 @@ class PendenciaOut(BaseModel):
     resolvida_em: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class PendenciaSummary(BaseModel):
+    abertas: int
+    resolvidas: int
+    total: int
+    taxa_resolucao: float
 
 
 # ── Log de Acesso ──────────────────────────────────────────────────────────────

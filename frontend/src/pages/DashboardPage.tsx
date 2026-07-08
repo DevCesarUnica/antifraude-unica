@@ -11,13 +11,20 @@ const CARD_COLORS = {
   reprovadas:     "#f87171",
 };
 
-function KpiCard({ label, value, color }: { label: string; value: number; color: string }) {
+function fmtBRL(v: number): string {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function KpiCard({ label, value, valor, color }: { label: string; value: number; valor?: number; color: string }) {
   return (
     <div className="rounded-xl p-5 flex flex-col gap-1 flex-1 min-w-[140px]"
       style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>
       <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
       <p className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>{value}</p>
       <p className="text-xs" style={{ color: "var(--text-muted)" }}>{label}</p>
+      {valor != null && (
+        <p className="text-xs font-semibold" style={{ color }}>{fmtBRL(valor)}</p>
+      )}
     </div>
   );
 }
@@ -33,6 +40,13 @@ export default function DashboardPage() {
   const aprovadas     = (summary?.aprovadas ?? 0) + (summary?.confirmadas_banco ?? 0);
   const naoMapeadas   = (summary?.enfileiradas ?? 0) + (summary?.erro ?? 0);
   const reprovadas    = (summary?.reprovadas ?? 0) + (summary?.bloqueadas ?? 0);
+
+  const valores = summary?.valores_por_status ?? {};
+  const somaValores = (...chaves: string[]) => chaves.reduce((acc, k) => acc + (valores[k] ?? 0), 0);
+  const valorAnalisar      = somaValores("EM_ANALISE", "ANALISE_MANUAL");
+  const valorAprovadas     = somaValores("APROVADA", "CONFIRMADA_BANCO");
+  const valorNaoMapeadas   = somaValores("ENFILEIRADA", "ERRO");
+  const valorReprovadas    = somaValores("REPROVADA", "BLOQUEADA");
 
   const chartData = [
     { name: "Analisar",       valor: analisar,    color: CARD_COLORS.analisar },
@@ -58,10 +72,10 @@ export default function DashboardPage() {
         ) : (
           <>
             <div className="flex gap-3 overflow-x-auto pb-2">
-              <KpiCard label="Analisar"      value={analisar}    color={CARD_COLORS.analisar} />
-              <KpiCard label="Aprovadas"     value={aprovadas}   color={CARD_COLORS.aprovadas} />
-              <KpiCard label="Não Mapeadas"  value={naoMapeadas} color={CARD_COLORS.nao_mapeadas} />
-              <KpiCard label="Reprovadas"    value={reprovadas}  color={CARD_COLORS.reprovadas} />
+              <KpiCard label="Analisar"      value={analisar}    valor={valorAnalisar}    color={CARD_COLORS.analisar} />
+              <KpiCard label="Aprovadas"     value={aprovadas}   valor={valorAprovadas}   color={CARD_COLORS.aprovadas} />
+              <KpiCard label="Não Mapeadas"  value={naoMapeadas} valor={valorNaoMapeadas} color={CARD_COLORS.nao_mapeadas} />
+              <KpiCard label="Reprovadas"    value={reprovadas}  valor={valorReprovadas}  color={CARD_COLORS.reprovadas} />
             </div>
 
             <div className="rounded-xl p-6" style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}>

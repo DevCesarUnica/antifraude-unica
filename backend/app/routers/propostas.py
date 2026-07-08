@@ -158,8 +158,13 @@ def resumo_propostas(db: Session = Depends(get_db)):
     """Contadores por status para o dashboard."""
     from sqlalchemy import func
 
-    rows = db.query(Proposta.status, func.count(Proposta.id)).group_by(Proposta.status).all()
-    counts = {r.status: r[1] for r in rows}
+    rows = (
+        db.query(Proposta.status, func.count(Proposta.id), func.coalesce(func.sum(Proposta.valor), 0.0))
+        .group_by(Proposta.status)
+        .all()
+    )
+    counts = {r[0]: r[1] for r in rows}
+    valores = {r[0]: float(r[2]) for r in rows}
     total = sum(counts.values())
 
     return PropostaSummary(
@@ -173,6 +178,8 @@ def resumo_propostas(db: Session = Depends(get_db)):
         enviadas_banco=counts.get(StatusProposta.ENVIADA_BANCO, 0),
         confirmadas_banco=counts.get(StatusProposta.CONFIRMADA_BANCO, 0),
         erro=counts.get(StatusProposta.ERRO, 0),
+        valor_total=sum(valores.values()),
+        valores_por_status={str(status.value): valor for status, valor in valores.items()},
     )
 
 

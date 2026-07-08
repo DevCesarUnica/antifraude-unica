@@ -48,7 +48,7 @@ negócio".
 
 ### 🔴 CRÍTICO
 
-#### C1. Regra BLACKLIST nunca dispara (AttributeError silencioso)
+#### C1. Regra BLACKLIST nunca dispara (AttributeError silencioso) — ✅ CORRIGIDO
 `backend/app/services/antifraude.py:190-192`:
 ```python
 entry = self._db.query(Blacklist).filter(
@@ -65,6 +65,36 @@ a blacklist estivesse vazia**, mesmo com CPFs cadastrados via
 `POST /blacklist` (que funciona normalmente do lado do CRUD). Verificado
 diretamente por mim, não só pelo agente — confirmado lendo `models.py` e
 `antifraude.py` lado a lado.
+
+**Causa raiz mais profunda, descoberta só na hora de corrigir:** o bug não
+era só no código — a tabela `blacklist` no Postgres **nunca tinha sido
+migrada** para o schema atual de `models.py`. Ainda tinha as colunas antigas
+(`id, cpf, motivo, adicionado_por, criado_em`), sem `tipo`/`valor`/`fonte`/
+`ativo`. Ou seja, mesmo corrigindo só o código, qualquer query com
+`Blacklist.tipo`/`Blacklist.valor` (inclusive o próprio `POST /blacklist/`
+do router mais novo) quebrava com
+`psycopg2.errors.UndefinedColumn: column blacklist.tipo does not exist`.
+Isso nunca apareceu em teste manual porque ninguém nunca tinha conseguido
+cadastrar nada na blacklist nesse ambiente para começo de conversa.
+
+**Correção aplicada:**
+1. `backend/services/antifraude.py` — troca de
+   `Blacklist.cpf == proposta.cpf_cliente` para
+   `Blacklist.tipo == TipoBlacklist.CPF, Blacklist.valor == proposta.cpf_cliente,
+   Blacklist.ativo == True` (import de `TipoBlacklist` adicionado).
+2. `backend/migrate_blacklist_schema.sql` (nova migration, aplicada no
+   Postgres local) — cria o enum `tipo_blacklist`, adiciona
+   `tipo`/`valor`/`fonte`/`ativo`, remove a coluna `cpf` antiga (tabela
+   confirmada vazia antes de rodar — 0 linhas, sem risco de perda de
+   dado), recria a constraint `uq_blacklist_tipo_valor` e os índices
+   `ix_blacklist_valor`/`ix_blacklist_tipo`/`ix_blacklist_ativo`.
+
+**Validado com dado real (fluxo completo, depois limpo):** criei uma regra
+BLACKLIST de teste, cadastrei um CPF fictício via `POST /blacklist/`,
+simulei via `POST /regras/simular` — resultado `BLOQUEADO`, motivo "CPF
+99988877766 na blacklist: ...". Simulei de novo com um CPF diferente —
+resultado `MANUAL` (sem falso positivo). Regra de teste desativada e
+entrada de blacklist removida depois da validação.
 
 #### C2. Pipeline de processamento duplicada e divergente (dev vs. produção)
 - `routers/propostas.py:25-80` (`_processar_sync`) — shim síncrono "modo dev
@@ -322,8 +352,17 @@ sem alerta a ninguém.
 
 ## 3. Correções realizadas
 
-**Nenhuma ainda.** Conforme instrução explícita — auditoria primeiro,
-relatório mostrado, correções só depois de alinhar com você quais aplicar.
+- **C1 — Regra BLACKLIST nunca dispara.** Corrigido o código
+  (`antifraude.py` passou a consultar `tipo`+`valor`+`ativo`, não a
+  coluna inexistente `cpf`) **e** a causa raiz mais profunda descoberta
+  no processo: a tabela `blacklist` no Postgres nunca tinha sido migrada
+  para o schema atual (`backend/migrate_blacklist_schema.sql`, aplicada).
+  Validado com CPF fictício via simulador — bloqueia de verdade agora.
+  Ver detalhe completo na seção 2, CRÍTICO C1.
+
+O restante da lista (seção 4) continua aguardando priorização — auditoria
+primeiro, relatório mostrado, correções aplicadas uma de cada vez conforme
+você for pedindo.
 
 ---
 
@@ -333,7 +372,7 @@ relatório mostrado, correções só depois de alinhar com você quais aplicar.
 
 | # | Correção | Risco de aplicar |
 |---|---|---|
-| C1 | Trocar `Blacklist.cpf == proposta.cpf_cliente` por `Blacklist.tipo == TipoBlacklist.CPF, Blacklist.valor == proposta.cpf_cliente, Blacklist.ativo == True` | Nenhum — só liga uma regra que já deveria estar funcionando. **Mudança de comportamento observável**: propostas com CPF na blacklist passam a bloquear/pontuar de verdade — avisar o time antes de subir. |
+| C1 | ✅ **FEITO** — código corrigido + `migrate_blacklist_schema.sql` aplicada (tabela real estava com schema antigo, sem `tipo`/`valor`) | Aplicado e validado com CPF fictício via simulador. **Mudança de comportamento observável**: propostas com CPF na blacklist agora bloqueiam/pontuam de verdade — avise o time antes de replicar em outros ambientes. |
 | C3 | Inverter o fallback de status: só `BLOQUEADO` explícito vira `BLOQUEADA`; qualquer outro valor (inclusive um `APROVADO` inesperado) cai em `ANALISE_MANUAL` — nos dois arquivos (C2) | Nenhum — reforça a garantia já documentada, não muda comportamento hoje (o `else` é código morto atualmente) |
 | A2 | Envolver `_auto_mapear_convenio` em `try/except IntegrityError` com rollback do savepoint | Nenhum — só evita a proposta ficar presa |
 | A5 | Adicionar índice às 3 FKs sem índice | Nenhum — migration aditiva, sem downtime relevante |
@@ -365,9 +404,8 @@ Nenhum. Esta etapa é só investigação e relatório, conforme solicitado.
 
 ## 6. Riscos remanescentes (se nada for corrigido)
 
-- Fraudadores com CPF na blacklist continuam sendo aprovados/analisados
-  normalmente, sem nenhum sinal (C1) — **risco financeiro direto e
-  imediato**, independente de qualquer outra decisão.
+- ~~Fraudadores com CPF na blacklist continuam sendo aprovados/analisados
+  normalmente, sem nenhum sinal (C1)~~ — **corrigido** (ver seção 3).
 - Qualquer pessoa com acesso à rede onde o backend roda pode hoje aprovar
   contratos reais no Storm, criar operações no Titan, remover CPF da
   blacklist e exportar dados pessoais — sem login (C4).

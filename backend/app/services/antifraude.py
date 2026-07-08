@@ -23,7 +23,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Proposta, RegraAntifraude, Blacklist, Convenio, TipoRegra, ResultadoMotor
+    Proposta, RegraAntifraude, Blacklist, TipoBlacklist, Convenio, TipoRegra, ResultadoMotor
 )
 from app.core.logging import log
 
@@ -188,7 +188,9 @@ class MotorAntifraude:
     def _blacklist(self, proposta: Proposta, params: dict, peso: int, bloqueante: bool) -> ResultadoRegra:
         """CPF do cliente consta na blacklist."""
         entry = self._db.query(Blacklist).filter(
-            Blacklist.cpf == proposta.cpf_cliente
+            Blacklist.tipo == TipoBlacklist.CPF,
+            Blacklist.valor == proposta.cpf_cliente,
+            Blacklist.ativo == True,  # noqa: E712
         ).first()
         if entry:
             return ResultadoRegra(

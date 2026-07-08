@@ -1,0 +1,72 @@
+================================================================================
+  PROBLEMAS PENDENTES — CRÍTICOS DA AUDITORIA DE PRODUÇÃO
+================================================================================
+
+Lista curta dos problemas CRÍTICOS encontrados na auditoria técnica de
+pré-produção que AINDA NÃO foram corrigidos. Detalhe completo (código,
+cenário de falha, correção recomendada) em AUDITORIA_PRODUCAO.md, seção 2.
+
+Já corrigido e removido desta lista: C1 (regra BLACKLIST nunca disparava —
+ver AUDITORIA_PRODUCAO.md seção 3 para o que foi feito).
+
+Nenhum destes foi corrigido ainda — aguardando prioridade.
+
+--------------------------------------------------------------------------------
+
+C2. PIPELINE DE PROCESSAMENTO DUPLICADA E DIVERGENTE (dev vs. produção)
+    O shim síncrono de dev (routers/propostas.py::_processar_sync) resolve
+    corretor e calcula shadow. A task Celery real de produção
+    (workers/tasks.py::processar_proposta) NÃO faz nenhuma das duas coisas.
+    docker-compose.yml sobe um worker Celery real rodando essa task.
+    Efeito: em produção via Docker, Proposta.corretor_id,
+    corretor_resolucao e limite_corretor_shadow nunca são preenchidos.
+
+C3. FALLBACK DE STATUS ASSUME APROVADO SEM GUARDA
+    Em _processar_sync e em workers/tasks.py, o "else" depois de checar
+    BLOQUEADO/MANUAL assume APROVADA. Hoje é código morto (o motor nunca
+    retorna APROVADO), mas é uma armadilha: qualquer regressão futura em
+    antifraude.py aprovaria proposta automaticamente sem ação humana — e
+    no caminho Celery, dispararia envio automático ao banco também.
+    Correção: inverter a lógica (só BLOQUEADO explícito bloqueia; qualquer
+    outro valor cai em ANALISE_MANUAL, nunca em APROVADA).
+
+C4. MAIORIA DOS ENDPOINTS MUTANTES SEM AUTENTICAÇÃO
+    DELETE /blacklist/{id}, POST /storm/antifraude/{id}/aprovar|recusar|
+    pendenciar, POST /titan/operacoes, GET /relatorios/*, GET /buscar/* —
+    tudo isso acessível sem login hoje. Envolve dinheiro, dado pessoal
+    (CPF) e decisão de crédito. Lista completa por router em
+    AUDITORIA_SISTEMA.md, seção 1.1.
+
+C5. CONTROLE DE PERFIL AUSENTE NA APROVAÇÃO/BLOQUEIO DE PROPOSTA
+    HIERARQUIA_USUARIOS.txt diz que aprovar/bloquear proposta exige ADMIN,
+    GESTOR ou ANALISTA (nunca OPERADOR). O código (routers/propostas.py,
+    aprovar_manual/bloquear_manual/reprocessar) só checa se está logado,
+    não checa perfil. Um OPERADOR pode aprovar/bloquear crédito real hoje.
+
+C6. docker-compose.yml REFERENCIA UM Dockerfile DE FRONTEND QUE NÃO EXISTE
+    O serviço "frontend" no docker-compose.yml aponta pra
+    ./frontend/Dockerfile, que não existe no repositório. `docker-compose
+    up` falha na hora de buildar o frontend — o deploy documentado está
+    quebrado hoje.
+
+C7. SECRETS INSEGUROS COMO VALOR PADRÃO, SEM VALIDAÇÃO DE AMBIENTE
+    backend/app/core/config.py tem DATABASE_URL com senha real, TITAN_API_KEY
+    = "123" e SECRET_KEY = "mude-em-producao" como defaults — os mesmos
+    valores aparecem embutidos no docker-compose.yml. Se o .env/variáveis
+    de ambiente do deploy real não sobrescreverem isso, o sistema sobe
+    com uma chave JWT pública (dá pra forjar token de admin) e senha de
+    banco conhecida, sem nenhum erro ou aviso.
+
+C8. _seed_admin RODA A CADA LOGIN, NÃO SÓ NO STARTUP
+    routers/auth.py chama _seed_admin(db) dentro de POST /auth/login, toda
+    vez. Se a tabela usuarios ficar vazia por qualquer motivo em produção,
+    um usuário admin/admin123 é recriado silenciosamente no meio do login
+    de qualquer pessoa, sem alertar ninguém.
+
+--------------------------------------------------------------------------------
+
+Para o detalhe técnico completo de cada um (arquivo:linha, trecho de
+código, correção recomendada e risco de aplicar) ver:
+  AUDITORIA_PRODUCAO.md — seção 2 (achados) e seção 4 (correções,
+  separadas entre "seguro corrigir agora" e "precisa de decisão de
+  negócio antes").

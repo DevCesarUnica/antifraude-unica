@@ -53,11 +53,13 @@ class TipoRegra(str, PyEnum):
     UF_BLOQUEADA   = "UF_BLOQUEADA"
     SCORE_RISCO    = "SCORE_RISCO"
     LIMITE_DIARIO  = "LIMITE_DIARIO"
-    # Placeholder para uso futuro — depende da FASE 2 (vínculo corretor×esteira,
-    # ver ANALISE_VINCULO_CORRETOR_PROPOSTA.md). Sem avaliador em antifraude.py
-    # ainda: cadastrar uma regra deste tipo hoje nunca dispara (por design).
-    # Esteiras Comerciais/GrupoCorretor/Corretor são um módulo separado deste
-    # motor — não misturar.
+    # Compara proposta.valor contra o limite_valor da Esteira Comercial
+    # (GrupoCorretor) do corretor vinculado à proposta. Sempre shadow_mode
+    # (nunca soma score nem bloqueia, por design — ver antifraude.py
+    # ::_limite_corretor_shadow). Uma regra deste tipo por esteira é gerada
+    # automaticamente por app/services/gerar_regras_esteiras.py — não editar
+    # o parâmetro "limite" manualmente, ele é ressincronizado a partir da
+    # esteira a cada rodada do backfill.
     LIMITE_CORRETOR_SHADOW = "LIMITE_CORRETOR_SHADOW"
 
 
@@ -134,8 +136,8 @@ class CorretorEsteira(Base):
     faixa de valor em bancos diferentes) — comportamento observado nos dados
     reais do WebDeck, ver ANALISE_REGRAS_WEBDECK.md seção 2. `Corretor.grupo_id`
     continua apontando para a esteira "principal" (a de `data_entrada` mais
-    recente), que é a candidata a alimentar uma futura regra de limite por
-    corretor (LIMITE_CORRETOR, em modo shadow — não implementada ainda).
+    recente), que é a que alimenta a regra LIMITE_CORRETOR_SHADOW (modo
+    shadow) — ver app/services/gerar_regras_esteiras.py.
     """
     __tablename__ = "corretor_esteiras"
     __table_args__ = (
@@ -267,6 +269,15 @@ class RegraAntifraude(Base):
     atualizado_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    # Preenchido só quando a regra foi gerada automaticamente a partir de uma
+    # Esteira Comercial (tipo=LIMITE_CORRETOR_SHADOW) — NULL para regras
+    # criadas manualmente pela tela /regras. Único por esteira (constraint
+    # parcial no banco): no máximo 1 regra por esteira, permitindo backfill
+    # idempotente. Ver app/services/gerar_regras_esteiras.py.
+    esteira_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("grupos_corretores.id"), nullable=True, index=True
+    )
 
 
 # ── Blacklist ─────────────────────────────────────────────────────────────────

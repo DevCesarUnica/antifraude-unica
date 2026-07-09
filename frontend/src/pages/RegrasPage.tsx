@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getRegras, criarRegra, atualizarRegra, desativarRegra,
-  getAuditoriaRegra, simularRegra,
+  getAuditoriaRegra, simularRegra, gerarRegrasDeEsteiras,
 } from "@/lib/api";
 import Layout from "@/components/Layout";
 
@@ -24,6 +24,7 @@ interface Regra {
   atualizado_por: string | null;
   criado_em: string;
   atualizado_em: string;
+  esteira_id?: string | null;
 }
 
 interface LogAuditoriaItem {
@@ -65,13 +66,16 @@ const TIPOS = [
   { value: "UF_BLOQUEADA",   label: "UF Bloqueada" },
   { value: "SCORE_RISCO",    label: "Score de Risco" },
   { value: "LIMITE_DIARIO",  label: "Limite Diário por Corretor" },
+  { value: "LIMITE_CORRETOR_SHADOW", label: "Monitoramento de Limite do Corretor" },
 ];
 
-const TIPO_FUTURO = { value: "LIMITE_CORRETOR_SHADOW", label: "Limite por Corretor (em breve)" };
-
 const TIPO_LABEL: Record<string, string> = Object.fromEntries(
-  [...TIPOS, TIPO_FUTURO].map((t) => [t.value, t.label])
+  TIPOS.map((t) => [t.value, t.label])
 );
+
+function origemRegra(r: Regra): string {
+  return r.esteira_id ? "Gerada automaticamente pela Esteira Comercial" : "Manual";
+}
 
 const UFS_BR = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
 
@@ -93,6 +97,7 @@ function buildParametros(tipo: string, params: Record<string, any>): Record<stri
     case "UF_BLOQUEADA":   return { ufs: params.ufs || [] };
     case "SCORE_RISCO":    return { valor_medio_referencia: Number(params.valor_medio_referencia) || 10000 };
     case "LIMITE_DIARIO":  return { limite_valor_diario: Number(params.limite_valor_diario) || 0 };
+    case "LIMITE_CORRETOR_SHADOW": return params;
     default:               return {};
   }
 }
@@ -106,6 +111,8 @@ function resumoParametros(tipo: string, params: any): string {
     case "UF_BLOQUEADA":   return (params.ufs || []).length ? (params.ufs as string[]).join(", ") : "Nenhuma";
     case "SCORE_RISCO":    return `Ref: R$ ${Number(params.valor_medio_referencia || 0).toLocaleString("pt-BR")}`;
     case "LIMITE_DIARIO":  return `R$ ${Number(params.limite_valor_diario || 0).toLocaleString("pt-BR")}/dia`;
+    case "LIMITE_CORRETOR_SHADOW":
+      return params.nome_esteira ? `Esteira: ${params.nome_esteira} · Até R$ ${Number(params.limite || 0).toLocaleString("pt-BR")}` : "—";
     default:               return JSON.stringify(params);
   }
 }
@@ -137,14 +144,16 @@ const blurBorder = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement | H
 
 // ── Badges ───────────────────────────────────────────────────────────────────
 
-function Badge({ label, bg, color }: { label: string; bg: string; color: string }) {
+function Badge({ label, bg, color, title }: { label: string; bg: string; color: string; title?: string }) {
   return (
     <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide whitespace-nowrap"
-      style={{ backgroundColor: bg, color }}>
+      style={{ backgroundColor: bg, color }} title={title}>
       {label}
     </span>
   );
 }
+
+const TOOLTIP_MODO_OBSERVACAO = "Esta validação é apenas informativa. Ela não bloqueia, reprova ou altera a decisão da proposta.";
 
 function StatusBadge({ ativo }: { ativo: boolean }) {
   return ativo
@@ -159,7 +168,7 @@ function BloqueanteBadge({ bloqueante }: { bloqueante: boolean }) {
 
 function ShadowBadge({ shadow }: { shadow: boolean }) {
   if (!shadow) return <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>;
-  return <Badge label="Shadow" bg="rgba(168,85,247,0.15)" color="#a855f7" />;
+  return <Badge label="Observação" bg="rgba(168,85,247,0.15)" color="#a855f7" title={TOOLTIP_MODO_OBSERVACAO} />;
 }
 
 function CriticaBadge() {
@@ -168,7 +177,7 @@ function CriticaBadge() {
 
 function EfeitoBadge({ efeito }: { efeito: "REAL" | "SHADOW" }) {
   return efeito === "SHADOW"
-    ? <Badge label="Shadow" bg="rgba(168,85,247,0.15)" color="#a855f7" />
+    ? <Badge label="Observação" bg="rgba(168,85,247,0.15)" color="#a855f7" title={TOOLTIP_MODO_OBSERVACAO} />
     : <Badge label="Real" bg="rgba(96,165,250,0.15)" color="#60a5fa" />;
 }
 
@@ -197,11 +206,20 @@ function CamposParametros({ tipo, params, onChange }: {
     return (
       <div className="flex items-start gap-3 p-3 rounded-lg"
         style={{ backgroundColor: "rgba(168,85,247,0.06)", border: "1px solid rgba(168,85,247,0.25)" }}>
-        <span className="text-base mt-0.5" style={{ color: "#a855f7" }}>⏳</span>
-        <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-          Preparado no schema (enum <code>tipo_regra</code>), mas ainda sem avaliador no motor —
-          depende do vínculo Corretor × Esteira (Fase 2). Uma regra deste tipo é aceita mas nunca dispara hoje.
-        </p>
+        <span className="text-base mt-0.5" style={{ color: "#a855f7" }}>🔒</span>
+        <div className="text-xs leading-relaxed space-y-1" style={{ color: "var(--text-secondary)" }}>
+          <p>
+            Compara o valor da proposta contra o limite da esteira <strong>{params.nome_esteira || "—"}</strong>
+            {" "}(R$ {Number(params.limite || 0).toLocaleString("pt-BR")}). Sempre em Modo Observação — esta
+            validação é apenas informativa, nunca soma pontuação de risco nem bloqueia a proposta, mesmo que
+            as opções abaixo sejam alteradas.
+          </p>
+          <p>
+            Somente leitura: o limite é ressincronizado automaticamente a partir da Esteira Comercial
+            toda vez que "Gerar regras das esteiras" é executado — para mudar o valor, ajuste o limite
+            da esteira em Grupos/Esteiras.
+          </p>
+        </div>
       </div>
     );
   }
@@ -464,7 +482,6 @@ function RegraDrawer({ regraEditando, onClose, onSaved }: {
               <label className="text-xs font-semibold uppercase tracking-wider mb-1 block" style={{ color: "var(--text-muted)" }}>Tipo de regra</label>
               <select value={form.tipo} onChange={(e) => handleTipoChange(e.target.value)} style={inputCls} onFocus={focusRed} onBlur={blurBorder}>
                 {TIPOS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                <option value={TIPO_FUTURO.value}>{TIPO_FUTURO.label}</option>
               </select>
             </div>
           </div>
@@ -530,13 +547,19 @@ function RegraDrawer({ regraEditando, onClose, onSaved }: {
                 style={{ transform: form.shadow_mode ? "translateX(20px)" : "translateX(0)" }} />
             </div>
             <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              <span className="font-semibold" style={{ color: "var(--text-primary)" }}>Shadow Mode</span> — avalia e registra, mas nunca soma score nem bloqueia
+              <span className="font-semibold" style={{ color: "var(--text-primary)" }}>Modo Observação</span> — avalia e registra, mas nunca soma score nem bloqueia
             </span>
           </label>
 
+          {form.shadow_mode && (
+            <p className="text-xs p-2 rounded" style={{ backgroundColor: "rgba(168,85,247,0.08)", color: "#a855f7" }}>
+              {TOOLTIP_MODO_OBSERVACAO}
+            </p>
+          )}
+
           {form.bloqueante && form.shadow_mode && (
             <p className="text-xs p-2 rounded" style={{ backgroundColor: "rgba(234,179,8,0.1)", color: "#eab308" }}>
-              Shadow Mode sempre vence: mesmo marcada como bloqueante, esta regra não vai bloquear nada enquanto Shadow Mode estiver ativo.
+              Modo Observação sempre vence: mesmo marcada como bloqueante, esta regra não vai bloquear nada enquanto o Modo Observação estiver ativo.
             </p>
           )}
 
@@ -765,6 +788,15 @@ export default function RegrasPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["regras"] }),
   });
 
+  const [resultadoBackfill, setResultadoBackfill] = useState<{ esteiras_elegiveis: number; regras_criadas: number; regras_atualizadas: number } | null>(null);
+  const mutGerarDeEsteiras = useMutation({
+    mutationFn: gerarRegrasDeEsteiras,
+    onSuccess: (data) => {
+      setResultadoBackfill(data);
+      qc.invalidateQueries({ queryKey: ["regras"] });
+    },
+  });
+
   // ── KPIs ──
   const kpis = useMemo(() => {
     const total = regras.length;
@@ -812,13 +844,32 @@ export default function RegrasPage() {
             </p>
           </div>
           {aba === "regras" && (
-            <button onClick={abrirNova}
-              className="px-4 py-2 rounded-lg text-xs font-bold text-white uppercase transition-opacity hover:opacity-80"
-              style={{ backgroundColor: "#DC2626", boxShadow: "0 4px 14px rgba(220,38,38,0.3)" }}>
-              + Nova Regra
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => mutGerarDeEsteiras.mutate()} disabled={mutGerarDeEsteiras.isPending}
+                className="px-4 py-2 rounded-lg text-xs font-bold uppercase transition-opacity hover:opacity-80 disabled:opacity-40"
+                style={{ backgroundColor: "rgba(168,85,247,0.12)", color: "#a855f7", border: "1px solid rgba(168,85,247,0.3)" }}>
+                {mutGerarDeEsteiras.isPending ? "Gerando..." : "⟳ Gerar regras das esteiras"}
+              </button>
+              <button onClick={abrirNova}
+                className="px-4 py-2 rounded-lg text-xs font-bold text-white uppercase transition-opacity hover:opacity-80"
+                style={{ backgroundColor: "#DC2626", boxShadow: "0 4px 14px rgba(220,38,38,0.3)" }}>
+                + Nova Regra
+              </button>
+            </div>
           )}
         </div>
+
+        {resultadoBackfill && aba === "regras" && (
+          <div className="rounded-lg p-3 text-xs flex items-center justify-between"
+            style={{ backgroundColor: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.25)", color: "#a855f7" }}>
+            <span>
+              {resultadoBackfill.esteiras_elegiveis} esteira(s) com limite cadastrado ·{" "}
+              <strong>{resultadoBackfill.regras_criadas} criada(s)</strong> ·{" "}
+              <strong>{resultadoBackfill.regras_atualizadas} atualizada(s)</strong>
+            </span>
+            <button onClick={() => setResultadoBackfill(null)} style={{ color: "#a855f7" }}>✕</button>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-1 border-b" style={{ borderColor: "var(--border)" }}>
@@ -842,8 +893,8 @@ export default function RegrasPage() {
             <div className="flex flex-wrap gap-4">
               <StatCard label="Total de Regras" value={kpis.total} color="#8B5CF6" />
               <StatCard label="Regras Ativas" value={kpis.ativas} color="#22C55E" />
-              <StatCard label="Regras Bloqueantes" value={kpis.bloqueantes} color="#EF4444" sub="bloqueante e fora do shadow" />
-              <StatCard label="Em Shadow Mode" value={kpis.shadow} color="#A855F7" />
+              <StatCard label="Regras Bloqueantes" value={kpis.bloqueantes} color="#EF4444" sub="bloqueante e fora do modo observação" />
+              <StatCard label="Em Modo Observação" value={kpis.shadow} color="#A855F7" />
               <StatCard label="Última Alteração" value={fmtDataCurta(kpis.ultimaAlteracao)} color="#60A5FA" />
             </div>
 
@@ -854,7 +905,6 @@ export default function RegrasPage() {
               <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)} style={{ ...inputCls, width: "auto" }} onFocus={focusRed} onBlur={blurBorder}>
                 <option value="">Todos os tipos</option>
                 {TIPOS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                <option value={TIPO_FUTURO.value}>{TIPO_FUTURO.label}</option>
               </select>
               <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value as any)} style={{ ...inputCls, width: "auto" }} onFocus={focusRed} onBlur={blurBorder}>
                 <option value="">Ativa/Inativa</option>
@@ -867,9 +917,9 @@ export default function RegrasPage() {
                 <option value="nao">Não bloqueantes</option>
               </select>
               <select value={filtroShadow} onChange={(e) => setFiltroShadow(e.target.value as any)} style={{ ...inputCls, width: "auto" }} onFocus={focusRed} onBlur={blurBorder}>
-                <option value="">Shadow Mode</option>
-                <option value="sim">Somente shadow</option>
-                <option value="nao">Fora de shadow</option>
+                <option value="">Modo Observação</option>
+                <option value="sim">Somente observação</option>
+                <option value="nao">Fora do modo observação</option>
               </select>
               <input value={filtroCriador} onChange={(e) => setFiltroCriador(e.target.value)} placeholder="Criador (usuário)..."
                 style={{ ...inputCls, width: "auto" }} onFocus={focusRed} onBlur={blurBorder} />
@@ -881,7 +931,7 @@ export default function RegrasPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--border)", backgroundColor: "var(--bg-subtle)" }}>
-                      {["Nome", "Tipo", "Descrição", "Peso", "Bloqueante", "Status", "Shadow", "Criada em", "Última alteração", ""].map((h, i) => (
+                      {["Nome", "Tipo", "Descrição", "Origem", "Peso", "Bloqueante", "Status", "Observação", "Criada em", "Última alteração", ""].map((h, i) => (
                         <th key={i} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-left whitespace-nowrap"
                           style={{ color: "var(--text-muted)" }}>{h}</th>
                       ))}
@@ -889,10 +939,10 @@ export default function RegrasPage() {
                   </thead>
                   <tbody>
                     {isLoading && (
-                      <tr><td colSpan={10} className="text-center py-10 text-sm" style={{ color: "var(--text-muted)" }}>Carregando...</td></tr>
+                      <tr><td colSpan={11} className="text-center py-10 text-sm" style={{ color: "var(--text-muted)" }}>Carregando...</td></tr>
                     )}
                     {!isLoading && regrasFiltradas.length === 0 && (
-                      <tr><td colSpan={10} className="text-center py-10 text-sm" style={{ color: "var(--text-muted)" }}>Nenhuma regra encontrada.</td></tr>
+                      <tr><td colSpan={11} className="text-center py-10 text-sm" style={{ color: "var(--text-muted)" }}>Nenhuma regra encontrada.</td></tr>
                     )}
                     {regrasFiltradas.map((r, idx) => {
                       const critica = r.bloqueante && !r.shadow_mode && r.peso_score >= 80;
@@ -913,8 +963,13 @@ export default function RegrasPage() {
                               {TIPO_LABEL[r.tipo] ?? r.tipo}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-xs max-w-[220px] truncate" style={{ color: "var(--text-secondary)" }} title={r.descricao ?? resumoParametros(r.tipo, r.parametros)}>
-                            {r.descricao || resumoParametros(r.tipo, r.parametros)}
+                          <td className="px-4 py-3 text-xs max-w-[220px] truncate" style={{ color: "var(--text-secondary)" }}
+                            title={r.tipo === "LIMITE_CORRETOR_SHADOW" ? resumoParametros(r.tipo, r.parametros) : (r.descricao ?? resumoParametros(r.tipo, r.parametros))}>
+                            {r.tipo === "LIMITE_CORRETOR_SHADOW" ? resumoParametros(r.tipo, r.parametros) : (r.descricao || resumoParametros(r.tipo, r.parametros))}
+                          </td>
+                          <td className="px-4 py-3 text-xs max-w-[200px]" style={{ color: r.esteira_id ? "#a855f7" : "var(--text-muted)" }}
+                            title={origemRegra(r)}>
+                            {r.esteira_id ? "Esteira Comercial" : "Manual"}
                           </td>
                           <td className="px-4 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>{r.peso_score}</td>
                           <td className="px-4 py-3"><BloqueanteBadge bloqueante={r.bloqueante} /></td>

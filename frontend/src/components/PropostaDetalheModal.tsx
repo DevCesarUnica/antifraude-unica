@@ -145,7 +145,7 @@ function OrigemChip({ origem }: { origem: string }) {
 }
 
 function LimiteCorretorBadge({ status }: { status: string }) {
-  const dentro = status === "DENTRO_LIMITE";
+  const dentro = status === "DENTRO_DA_FAIXA";
   return (
     <span
       className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide whitespace-nowrap"
@@ -284,18 +284,25 @@ export default function PropostaDetalheModal({
             </div>
           </section>
 
-          {/* Corretor & Esteira (shadow — informativo, não bloqueia) */}
+          {/* Análise da Esteira (modo observação — informativo, não bloqueia) */}
           {proposta.corretor_esteira && (
             <section>
               <p className="text-[10px] font-black uppercase tracking-widest mb-3" style={{ color: "#DC2626" }}>
-                Corretor & Esteira <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>(shadow — informativo)</span>
+                Análise da Esteira{" "}
+                <span
+                  style={{ color: "var(--text-muted)", fontWeight: 600 }}
+                  title="Esta validação é apenas informativa. Ela não bloqueia, reprova ou altera a decisão da proposta."
+                >
+                  (Em modo observação — não bloqueia propostas)
+                </span>
               </p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-6 gap-y-3">
                 <Campo label="Corretor">{safe(proposta.corretor)}</Campo>
                 <Campo label="Esteira">{safe(proposta.corretor_esteira)}</Campo>
                 <Campo label="Limite">{proposta.corretor_limite != null ? fmtBRL(proposta.corretor_limite) : "—"}</Campo>
+                <Campo label="Valor da Proposta"><span className="font-bold">{fmtBRL(proposta.valor)}</span></Campo>
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: "var(--text-muted)" }}>Status</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5" style={{ color: "var(--text-muted)" }}>Resultado</p>
                   {proposta.limite_corretor_status ? <LimiteCorretorBadge status={proposta.limite_corretor_status} /> : "—"}
                 </div>
               </div>
@@ -329,8 +336,9 @@ export default function PropostaDetalheModal({
                             backgroundColor: r.efeito === "SHADOW" ? "rgba(168,85,247,0.15)" : "rgba(96,165,250,0.15)",
                             color: r.efeito === "SHADOW" ? "#a855f7" : "#60a5fa",
                           }}
+                          title={r.efeito === "SHADOW" ? "Esta validação é apenas informativa. Ela não bloqueia, reprova ou altera a decisão da proposta." : undefined}
                         >
-                          {r.efeito === "SHADOW" ? "Shadow" : "Real"}
+                          {r.efeito === "SHADOW" ? "Observação" : "Real"}
                         </span>
                         {r.bloqueante && (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase" style={{ backgroundColor: "rgba(239,68,68,0.15)", color: "#ef4444" }}>

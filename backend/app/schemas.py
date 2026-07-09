@@ -197,6 +197,9 @@ class RegraOut(BaseModel):
     atualizado_por: str | None = None
     criado_em: datetime
     atualizado_em: datetime
+    # Preenchido só quando gerada automaticamente a partir de uma Esteira
+    # Comercial — ver app/services/gerar_regras_esteiras.py.
+    esteira_id: str | None = None
 
     model_config = {"from_attributes": True}
 

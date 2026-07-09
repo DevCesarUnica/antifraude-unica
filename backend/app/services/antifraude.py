@@ -23,7 +23,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Proposta, RegraAntifraude, Blacklist, TipoBlacklist, Convenio, TipoRegra, ResultadoMotor
+    Proposta, RegraAntifraude, Blacklist, TipoBlacklist, Convenio, TipoRegra, ResultadoMotor, Corretor
 )
 from app.core.logging import log
 
@@ -176,6 +176,7 @@ class MotorAntifraude:
                 TipoRegra.UF_BLOQUEADA:   self._uf_bloqueada,
                 TipoRegra.SCORE_RISCO:    self._score_risco,
                 TipoRegra.LIMITE_DIARIO:  self._limite_diario,
+                TipoRegra.LIMITE_CORRETOR_SHADOW: self._limite_corretor_shadow,
             }
             avaliador = avaliadores.get(regra.tipo)
             if not avaliador:
@@ -291,6 +292,55 @@ class MotorAntifraude:
                 detalhes={"total_hoje": total_hoje, "valor_proposta": proposta.valor, "limite": limite},
             )
         return ResultadoRegra(disparou=False)
+
+    def _limite_corretor_shadow(self, proposta: Proposta, params: dict, peso: int, bloqueante: bool) -> ResultadoRegra:
+        """
+        Compara proposta.valor contra o limite da Esteira Comercial vinculada
+        ao corretor da proposta. Regra gerada automaticamente por esteira —
+        ver app/services/gerar_regras_esteiras.py. Só dispara quando o
+        corretor da proposta pertence exatamente à esteira desta regra
+        (params["esteira_id"] == Corretor.grupo_id); caso contrário essa
+        regra específica simplesmente não se aplica a esta proposta.
+
+        Defesa em profundidade: score_contribuicao e bloqueante são SEMPRE
+        0/False aqui, ignorando os valores de `peso`/`bloqueante` da regra —
+        mesmo que alguém edite a regra na tela para bloqueante=True ou
+        desligue shadow_mode, esta regra nunca pode virar bloqueio. Esteira
+        Comercial é informação de limite operacional, não critério de
+        fraude — nunca deve impedir a decisão humana.
+        """
+        if not proposta.corretor_id:
+            return ResultadoRegra(disparou=False)
+
+        esteira_id = params.get("esteira_id")
+        limite = params.get("limite")
+        if not esteira_id or limite is None:
+            return ResultadoRegra(disparou=False)
+
+        corretor = self._db.query(Corretor).filter(Corretor.id == proposta.corretor_id).first()
+        if not corretor or corretor.grupo_id != esteira_id:
+            return ResultadoRegra(disparou=False)
+
+        status = "ACIMA_DA_FAIXA" if proposta.valor > limite else "DENTRO_DA_FAIXA"
+        nome_esteira = params.get("nome_esteira", "")
+        return ResultadoRegra(
+            disparou=True,
+            motivo=(
+                f"Valor R$ {proposta.valor:,.2f} "
+                f"{'acima' if status == 'ACIMA_DA_FAIXA' else 'dentro'} da faixa da esteira "
+                f"'{nome_esteira}' (limite R$ {limite:,.2f})"
+            ),
+            score_contribuicao=0,
+            bloqueante=False,
+            detalhes={
+                "esteira_id": esteira_id,
+                "esteira": nome_esteira,
+                "limite": limite,
+                "valor_proposta": proposta.valor,
+                "status": status,
+                "corretor_id": proposta.corretor_id,
+            },
+        )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

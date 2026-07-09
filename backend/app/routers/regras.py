@@ -22,6 +22,7 @@ from app.schemas import (
 from app.routers.auth import verificar_token
 from app.services.auditoria import log_auditoria
 from app.services.antifraude import MotorAntifraude
+from app.services.gerar_regras_esteiras import gerar_regras_de_esteiras
 
 router = APIRouter(prefix="/regras", tags=["regras"])
 
@@ -172,6 +173,39 @@ def desativar_regra(
     )
     db.commit()
     return Mensagem(mensagem=f"Regra '{regra.nome}' desativada")
+
+
+# ── Backfill: gerar regras a partir de Esteiras Comerciais ───────────────────
+
+@router.post("/gerar-de-esteiras")
+def gerar_de_esteiras(
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(_exige_admin_ou_gestor),
+):
+    """
+    Gera/ressincroniza uma regra LIMITE_CORRETOR_SHADOW para cada Esteira
+    Comercial (GrupoCorretor) com limite_valor > 0. Idempotente — seguro
+    rodar de novo a qualquer momento (ex: depois de reimportar o CSV
+    WebDeck ou ajustar o limite de uma esteira).
+    """
+    resultado = gerar_regras_de_esteiras(db, usuario=usuario.username)
+
+    log_auditoria(
+        db,
+        acao=(
+            f"Gerou regras a partir de Esteiras Comerciais "
+            f"({resultado['regras_criadas']} criadas, {resultado['regras_atualizadas']} atualizadas)"
+        ),
+        usuario=usuario,
+        request=request,
+        tipo_entidade="regra_antifraude",
+        entidade_id="backfill_esteiras",
+        depois=resultado,
+        risco="MEDIO",
+    )
+    db.commit()
+    return resultado
 
 
 # ── Simulador ─────────────────────────────────────────────────────────────────

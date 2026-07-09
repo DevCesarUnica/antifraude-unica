@@ -89,6 +89,9 @@ export const desativarRegra = (id: string) =>
 export const getAuditoriaRegra = (id: string) =>
   api.get(`/regras/${id}/auditoria`).then((r) => r.data);
 
+export const gerarRegrasDeEsteiras = () =>
+  api.post("/regras/gerar-de-esteiras").then((r) => r.data);
+
 export const simularRegra = (data: {
   cpf_cliente: string;
   banco?: string;

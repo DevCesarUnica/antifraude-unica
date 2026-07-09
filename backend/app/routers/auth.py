@@ -72,7 +72,6 @@ def _seed_admin(db: Session) -> None:
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     from app.services.auditoria import log_auditoria
-    _seed_admin(db)
 
     identificador = body.identificador.strip().lower()
 

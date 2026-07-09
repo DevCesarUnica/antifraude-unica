@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Proposta, Corretor, AuditoriaLog, StatusProposta
+from app.routers.auth import verificar_token
 
-router = APIRouter(prefix="/relatorios", tags=["relatorios"])
+router = APIRouter(prefix="/relatorios", tags=["relatorios"], dependencies=[Depends(verificar_token)])
 
 
 # ── Relatório de Propostas ────────────────────────────────────────────────────

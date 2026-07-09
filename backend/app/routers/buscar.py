@@ -29,8 +29,9 @@ from app.database import get_db
 from app.models import Proposta
 from app.services.titan import TitanService, TitanAPIError
 from app.services.storm import StormService, StormAPIError
+from app.routers.auth import verificar_token
 
-router = APIRouter(prefix="/buscar", tags=["buscar"])
+router = APIRouter(prefix="/buscar", tags=["buscar"], dependencies=[Depends(verificar_token)])
 
 _FF_RE = re.compile(r"^FF-\d{2}/\d{2}/\d{4}-\d+$", re.IGNORECASE)
 

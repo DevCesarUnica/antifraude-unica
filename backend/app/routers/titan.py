@@ -6,9 +6,11 @@ Mapeamento de erros:
   TitanAPIError   → 503 Unavailable   (serviço externo indisponível)
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.services.titan import TitanService, TitanAPIError, TitanAuthError
 from app.schemas_titan import TitanCriarOperacaoRequest
+from app.routers.auth import verificar_token
+from app.models import Usuario
 
 router = APIRouter(prefix="/titan", tags=["titan"])
 
@@ -84,7 +86,7 @@ async def dados_referencia(force_refresh: bool = False):
 # ── Criar operação ───────────────────────────────────────────────────────────
 
 @router.post("/operacoes", status_code=201)
-async def criar_operacao(body: TitanCriarOperacaoRequest):
+async def criar_operacao(body: TitanCriarOperacaoRequest, _: Usuario = Depends(verificar_token)):
     """Envia uma operação ao motor de cálculo externo Titan (Hope/Ceoslab)."""
     try:
         async with TitanService() as titan:

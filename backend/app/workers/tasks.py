@@ -4,10 +4,11 @@ Tasks Celery — processamento assíncrono de propostas.
 Fluxo de uma proposta:
   1. API recebe → grava ENFILEIRADA → envia task
   2. processar_proposta: motor antifraude avalia
-     - BLOQUEADA  → grava status, auditoria, FIM
-     - MANUAL     → grava status, auditoria, FIM (analista decide)
-     - APROVADA   → task enviar_ao_banco
-  3. enviar_ao_banco: chama API do banco
+     - BLOQUEADO      → BLOQUEADA, FIM
+     - qualquer outro  → ANALISE_MANUAL, FIM (analista decide; nunca aprova
+                          nem envia ao banco automaticamente)
+  3. enviar_ao_banco: chamado manualmente via /propostas/{id}/enviar-banco
+     depois de aprovação humana; roda em background pelo Celery
      - Sucesso    → CONFIRMADA_BANCO
      - Falha      → retry até max; depois → DLQ (ERRO)
 
@@ -25,8 +26,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import SessionLocal
 from app.models import Proposta, StatusProposta, TipoEvento
-from app.services.antifraude import MotorAntifraude, ResultadoMotor
 from app.services.auditoria import AuditoriaService
+from app.services.proposta_pipeline import processar_proposta_core
 from app.core.logging import log
 
 logger = get_task_logger(__name__)
@@ -47,58 +48,23 @@ def _get_proposta(db, proposta_id: str) -> Proposta | None:
     acks_late=True,
 )
 def processar_proposta(self, proposta_id: str):
-    """Executa o motor antifraude na proposta e decide o próximo passo."""
+    """
+    Executa o núcleo de processamento (vínculo de corretor, motor antifraude,
+    shadow mode) e decide o próximo passo. Lógica compartilhada com o shim
+    síncrono de dev — ver app/services/proposta_pipeline.py.
+    """
     db = SessionLocal()
     try:
-        proposta = _get_proposta(db, proposta_id)
+        proposta = processar_proposta_core(db, proposta_id)
         if not proposta:
             log.error("task.proposta_nao_encontrada", proposta_id=proposta_id)
             return
 
-        auditoria = AuditoriaService(db)
-
-        # Marca início da análise
-        proposta.status = StatusProposta.EM_ANALISE
-        auditoria.registrar(proposta_id, TipoEvento.INICIO_ANALISE)
-
-        # Motor antifraude
-        motor = MotorAntifraude(db)
-        decisao = motor.avaliar(proposta)
-
-        # Grava resultado
-        proposta.score_fraude = decisao.score
-        proposta.resultado_motor = decisao.resultado
-        proposta.decisao_detalhes = {
-            "resultado": decisao.resultado,
-            "score": decisao.score,
-            "motivo_principal": decisao.motivo_principal,
-            "flags": decisao.flags,
-            "regras_disparadas": decisao.regras_disparadas,
-        }
-
-        auditoria.registrar(
-            proposta_id,
-            TipoEvento.DECISAO_MOTOR,
-            dados=proposta.decisao_detalhes,
-        )
-
-        if decisao.resultado == ResultadoMotor.BLOQUEADO:
-            proposta.status = StatusProposta.BLOQUEADA
-
-        elif decisao.resultado == ResultadoMotor.MANUAL:
-            proposta.status = StatusProposta.ANALISE_MANUAL
-
-        else:  # APROVADO
-            proposta.status = StatusProposta.APROVADA
-            # Agenda envio ao banco
-            enviar_ao_banco.apply_async(args=[proposta_id], queue="propostas")
-
-        db.commit()
         log.info(
             "task.processado",
             proposta_id=proposta_id,
-            resultado=decisao.resultado,
-            score=decisao.score,
+            resultado=proposta.resultado_motor,
+            score=proposta.score_fraude,
         )
 
     except SQLAlchemyError as exc:

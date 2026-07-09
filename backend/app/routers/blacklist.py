@@ -12,7 +12,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import Blacklist
+from app.models import Blacklist, Usuario
+from app.routers.auth import verificar_token
 
 router = APIRouter(prefix="/blacklist", tags=["blacklist"])
 
@@ -126,7 +127,11 @@ def criar(body: EntradaBody, db: Session = Depends(get_db)):
 
 
 @router.delete("/{entry_id}")
-def remover(entry_id: str, db: Session = Depends(get_db)):
+def remover(
+    entry_id: str,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(verificar_token),
+):
     entry = db.query(Blacklist).filter(Blacklist.id == entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Entrada não encontrada.")

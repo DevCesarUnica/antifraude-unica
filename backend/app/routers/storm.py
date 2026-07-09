@@ -98,7 +98,7 @@ async def tipos_pendencias():
 
 
 @router.post("/antifraude/{contrato_id}/aprovar")
-async def aprovar(contrato_id: int):
+async def aprovar(contrato_id: int, _: Usuario = Depends(verificar_token)):
     try:
         async with StormService() as storm:
             return await storm.aprovar_contrato(contrato_id)
@@ -112,7 +112,7 @@ class RecusaBody(BaseModel):
 
 
 @router.post("/antifraude/{contrato_id}/recusar")
-async def recusar(contrato_id: int, body: RecusaBody):
+async def recusar(contrato_id: int, body: RecusaBody, _: Usuario = Depends(verificar_token)):
     try:
         async with StormService() as storm:
             return await storm.recusar_contrato(contrato_id, body.model_dump(exclude_none=True))
@@ -126,7 +126,7 @@ class PendenciaBody(BaseModel):
 
 
 @router.post("/antifraude/{contrato_id}/pendenciar")
-async def pendenciar(contrato_id: int, body: PendenciaBody):
+async def pendenciar(contrato_id: int, body: PendenciaBody, _: Usuario = Depends(verificar_token)):
     try:
         async with StormService() as storm:
             return await storm.pendenciar_contrato(contrato_id, body.model_dump(exclude_none=True))

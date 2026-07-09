@@ -36,6 +36,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-unica}:${POSTGRES_PASSWORD:-unica123}@postgres:5432/${POSTGRES_DB:-antifraude}
       - REDIS_URL=redis://redis:6379/0
       - TITAN_BASE_URL=${TITAN_BASE_URL:-https://hope.titan.ceoslab.app/api}
@@ -55,10 +56,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-unica}:${POSTGRES_PASSWORD:-unica123}@postgres:5432/${POSTGRES_DB:-antifraude}
       - REDIS_URL=redis://redis:6379/0
       - TITAN_BASE_URL=${TITAN_BASE_URL:-https://hope.titan.ceoslab.app/api}
       - TITAN_API_KEY=${TITAN_API_KEY:-123}
+      - SECRET_KEY=${SECRET_KEY:-changeme-in-production}
     depends_on:
       postgres:
         condition: service_healthy

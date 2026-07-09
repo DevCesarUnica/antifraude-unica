@@ -20,60 +20,17 @@ from app.schemas import (
 from app.services.auditoria import AuditoriaService, log_auditoria
 from app.services.propostas_dashboard import query_dashboard
 
-# Modo dev: processa de forma síncrona (sem Celery/Redis).
-# Em produção com Docker, substitui por: from app.workers.tasks import processar_proposta
+# Modo dev: processa de forma síncrona (sem Celery/Redis), chamando o mesmo
+# núcleo usado pela task Celery de produção (app.workers.tasks.processar_proposta)
+# — ver app/services/proposta_pipeline.py. Isso evita a pipeline duplicada e
+# divergente entre dev e produção (AUDITORIA_PRODUCAO.md, C2).
 def _processar_sync(proposta_id: str):
     """Processa a proposta de forma síncrona (dev sem Celery)."""
     from app.database import SessionLocal
-    from app.services.antifraude import MotorAntifraude, ResultadoMotor
-    from app.services.resolver_corretor import resolver_corretor
-    from app.services.limite_corretor_shadow import avaliar_shadow
-    from app.services.propostas_dashboard import determinar_origem
-    from app.models import StatusProposta, TipoEvento
+    from app.services.proposta_pipeline import processar_proposta_core
     db2 = SessionLocal()
     try:
-        p = db2.query(Proposta).filter(Proposta.id == proposta_id).first()
-        if not p:
-            return
-        audit = AuditoriaService(db2)
-        p.status = StatusProposta.EM_ANALISE
-        audit.registrar(proposta_id, TipoEvento.INICIO_ANALISE)
-
-        # Vínculo corretor (Fase 2) — só vincula automaticamente em confiança
-        # ALTA. Ver ANALISE_VINCULO_CORRETOR_PROPOSTA.md. Não roda de novo se
-        # já tiver corretor_id (evita sobrescrever vínculo manual em reprocessamento).
-        if not p.corretor_id:
-            origem = determinar_origem(p.proposta_id_externo)
-            resolucao = resolver_corretor(db2, origem, p.payload_original)
-            p.corretor_resolucao = resolucao.to_dict()
-            if resolucao.confianca == "ALTA" and resolucao.corretor_id:
-                p.corretor_id = resolucao.corretor_id
-            audit.registrar(proposta_id, TipoEvento.VINCULO_CORRETOR, dados=p.corretor_resolucao)
-
-        decisao = MotorAntifraude(db2).avaliar(p)
-        p.score_fraude = decisao.score
-        p.resultado_motor = decisao.resultado
-        p.decisao_detalhes = {
-            "resultado": decisao.resultado,
-            "score": decisao.score,
-            "motivo_principal": decisao.motivo_principal,
-            "flags": decisao.flags,
-            "regras_disparadas": decisao.regras_disparadas,
-        }
-        audit.registrar(proposta_id, TipoEvento.DECISAO_MOTOR, dados=p.decisao_detalhes)
-
-        # Avaliação informativa LIMITE_CORRETOR (shadow) — nunca influencia
-        # resultado_motor/status, só é exibida no debug/dashboard.
-        p.limite_corretor_shadow = avaliar_shadow(db2, p)
-
-        if decisao.resultado == ResultadoMotor.BLOQUEADO:
-            p.status = StatusProposta.BLOQUEADA
-        elif decisao.resultado == ResultadoMotor.MANUAL:
-            p.status = StatusProposta.ANALISE_MANUAL
-        else:
-            p.status = StatusProposta.APROVADA
-
-        db2.commit()
+        processar_proposta_core(db2, proposta_id)
     finally:
         db2.close()
 
@@ -320,6 +277,7 @@ def aprovar_manual(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(verificar_token),
 ):
+    _exige_perfil(usuario, "admin", "gestor", "analista")
     proposta = _get_ou_404(db, proposta_id)
     _exige_status(proposta, StatusProposta.ANALISE_MANUAL)
 
@@ -354,6 +312,7 @@ def bloquear_manual(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(verificar_token),
 ):
+    _exige_perfil(usuario, "admin", "gestor", "analista")
     proposta = _get_ou_404(db, proposta_id)
     status_anterior = str(proposta.status)
     proposta.status = StatusProposta.BLOQUEADA
@@ -475,6 +434,7 @@ def reprocessar(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(verificar_token),
 ):
+    _exige_perfil(usuario, "admin", "gestor", "analista")
     proposta = _get_ou_404(db, proposta_id)
     if proposta.status not in (StatusProposta.ERRO, StatusProposta.BLOQUEADA):
         raise HTTPException(status_code=400, detail="Apenas propostas ERRO ou BLOQUEADA podem ser reprocessadas")
@@ -553,3 +513,8 @@ def _exige_status(proposta: Proposta, *status_validos: StatusProposta):
             status_code=400,
             detail=f"Ação inválida para status '{proposta.status}'. Esperado: {validos}",
         )
+
+
+def _exige_perfil(usuario: Usuario, *perfis_validos: str):
+    if usuario.perfil not in perfis_validos:
+        raise HTTPException(status_code=403, detail="Perfil sem permissão para esta ação")

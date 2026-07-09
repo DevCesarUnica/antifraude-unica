@@ -22,6 +22,14 @@ from app.routers import (
 async def lifespan(app: FastAPI):
     configure_logging()
     Base.metadata.create_all(bind=engine)
+
+    from app.routers.auth import _seed_admin
+    db = SessionLocal()
+    try:
+        _seed_admin(db)
+    finally:
+        db.close()
+
     yield
 
 

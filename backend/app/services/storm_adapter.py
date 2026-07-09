@@ -82,6 +82,12 @@ def extrair_banco(raw: dict) -> str:
     if not nome:
         conv_obj = _obj(raw, "convenio")
         nome = _str(conv_obj.get("banco"), conv_obj.get("banco_nome"))
+    if nome.strip().upper() == "HOPE":
+        # Guarda ativa da invariante do docstring: se algum dia a Storm
+        # enviar "HOPE" num payload (não deveria, é hub de outros bancos),
+        # cai em "Não informado" em vez de contaminar o dado com o valor
+        # reservado para hope_adapter.py.
+        return "Não informado"
     return nome or "Não informado"
 
 

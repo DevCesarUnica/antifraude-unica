@@ -354,6 +354,7 @@ async def enviar_banco(
     from app.services.titan_envio import extrair_calculo_de_payload, enviar_para_titan
     from app.core.config import settings
 
+    _exige_perfil(usuario, "admin", "gestor", "analista")
     proposta = _get_ou_404(db, proposta_id)
     _exige_status(proposta, StatusProposta.APROVADA)
 

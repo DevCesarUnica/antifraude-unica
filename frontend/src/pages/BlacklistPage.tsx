@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import Layout from "../components/Layout";
 import {
-  getBlacklist, criarEntradaBlacklist, removerEntradaBlacklist, importarBlacklist,
+  getBlacklist, criarEntradaBlacklist, removerEntradaBlacklist, importarBlacklist, exportarBlacklistExcel,
 } from "../lib/api";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -80,6 +80,7 @@ const TIPOS: TipoBlacklist[] = ["CPF", "CNPJ", "TELEFONE", "EMAIL"];
 export default function BlacklistPage() {
   const [items, setItems] = useState<EntradaBL[]>([]);
   const [total, setTotal] = useState(0);
+  const [contagemPorTipo, setContagemPorTipo] = useState<Record<TipoBlacklist, number>>({ CPF: 0, CNPJ: 0, TELEFONE: 0, EMAIL: 0 });
   const [pagina, setPagina] = useState(1);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
@@ -96,7 +97,8 @@ export default function BlacklistPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [importando, setImportando] = useState(false);
-  const [importResult, setImportResult] = useState<{ inseridos: number; pulados: number } | null>(null);
+  const [importResult, setImportResult] = useState<{ inseridos: number; pulados: number; erros: number } | null>(null);
+  const [exportando, setExportando] = useState(false);
 
   const LIMITE = 20;
 
@@ -106,6 +108,7 @@ export default function BlacklistPage() {
       const data = await getBlacklist({ pagina: p, limite: LIMITE, tipo: filtroTipo || undefined, busca: busca || undefined });
       setItems(data.items ?? []);
       setTotal(data.total ?? 0);
+      setContagemPorTipo(data.contagem_por_tipo ?? { CPF: 0, CNPJ: 0, TELEFONE: 0, EMAIL: 0 });
     } catch (e: AnyData) {
       setErro(e?.response?.data?.detail ?? "Erro ao carregar blacklist.");
     } finally { setLoading(false); }
@@ -155,6 +158,25 @@ export default function BlacklistPage() {
     }
   };
 
+  const exportarExcel = async () => {
+    setExportando(true); setErro(""); setMsg("");
+    try {
+      const blob = await exportarBlacklistExcel();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const agora = new Date();
+      const nomeArquivo = `blacklist_${agora.getFullYear()}-${pad(agora.getMonth() + 1)}-${pad(agora.getDate())}_${pad(agora.getHours())}-${pad(agora.getMinutes())}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = nomeArquivo; a.click();
+      URL.revokeObjectURL(url);
+      setMsg("Exportação concluída.");
+    } catch (e: AnyData) {
+      setErro(e?.response?.data?.detail ?? "Erro ao exportar.");
+    } finally {
+      setExportando(false);
+    }
+  };
+
   const totalPaginas = Math.ceil(total / LIMITE);
 
   return (
@@ -170,6 +192,14 @@ export default function BlacklistPage() {
             </p>
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={exportarExcel}
+              disabled={exportando}
+              className="px-4 py-2 rounded-lg text-xs font-bold transition-all"
+              style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+            >
+              {exportando ? "Exportando..." : "📊 Exportar Excel"}
+            </button>
             <button
               onClick={() => fileRef.current?.click()}
               disabled={importando}
@@ -192,7 +222,7 @@ export default function BlacklistPage() {
         {/* Contadores por tipo */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {TIPOS.map((t) => {
-            const count = items.filter((i) => i.tipo === t).length;
+            const count = contagemPorTipo[t] ?? 0;
             const { bg, color } = TIPO_COR[t];
             return (
               <button
@@ -206,7 +236,7 @@ export default function BlacklistPage() {
               >
                 <p className="text-xs font-black uppercase tracking-widest" style={{ color }}>{t}</p>
                 <p className="text-xl font-black mt-1" style={{ color: "var(--text-primary)" }}>
-                  {filtroTipo === t ? items.length : count}
+                  {count}
                 </p>
               </button>
             );
@@ -216,7 +246,7 @@ export default function BlacklistPage() {
         {/* Feedback */}
         {msg && <AlertOk msg={msg} />}
         {importResult && (
-          <AlertOk msg={`Importação concluída: ${importResult.inseridos} inseridos, ${importResult.pulados} ignorados (duplicados).`} />
+          <AlertOk msg={`Importação concluída: ${importResult.inseridos} inseridos, ${importResult.pulados} ignorados (duplicados), ${importResult.erros} com erro.`} />
         )}
         {erro && <AlertErro msg={erro} />}
 

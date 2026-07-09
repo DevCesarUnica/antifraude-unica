@@ -306,6 +306,7 @@ class Blacklist(Base):
     adicionado_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
 # ── Auditoria (append-only, NUNCA alterar registros) ─────────────────────────

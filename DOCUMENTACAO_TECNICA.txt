@@ -338,7 +338,7 @@ TABELA: regras_antifraude
 
 TABELA: blacklist
   id, tipo (TipoBlacklist enum), valor, motivo, fonte, adicionado_por
-  ativo, criado_em
+  ativo, criado_em, atualizado_em
   UNIQUE (tipo, valor), INDEX ix_blacklist_valor
 
 TABELA: usuarios
@@ -828,10 +828,27 @@ GET /relatorios/blacklist     Resumo da blacklist com estatísticas.
 
 CRUD da blacklist de CPFs/CNPJs/telefones/emails.
 
-GET    /blacklist/           ?tipo=&ativo=&q= (busca no campo valor)
-POST   /blacklist/           Adiciona à blacklist (BlacklistAdd)
-DELETE /blacklist/{id}       Desativa (soft delete)
-POST   /blacklist/{id}/reativar  Reativa registro desativado
+GET    /blacklist/           ?pagina=&limite=&tipo=&busca= (busca no campo
+                              valor). Retorna também contagem_por_tipo
+                              (contagem sobre a base inteira ativa, não só
+                              a página atual).
+GET    /blacklist/exportar-excel  Exporta toda a blacklist (sem paginação)
+                              em .xlsx. Requer autenticação (Depends
+                              verificar_token) — registra evento
+                              BLACKLIST_EXPORTADA em logs_auditoria.
+POST   /blacklist/           Adiciona à blacklist (EntradaBody). Se o valor
+                              já existir desativado, reativa a entrada
+                              (mantém criado_em, atualiza atualizado_em) em
+                              vez de criar duplicata — 409 se já ativo.
+POST   /blacklist/check      Verifica se um valor está na blacklist.
+DELETE /blacklist/{id}       Remove definitivamente (hard delete). Requer
+                              autenticação.
+POST   /blacklist/import     Importa CSV em lote (upsert por tipo+valor,
+                              relatório de inseridos/pulados/erros por
+                              linha). Requer autenticação.
+
+Coluna atualizado_em (TIMESTAMPTZ, NOT NULL, default now(), onupdate now())
+foi adicionada ao modelo Blacklist para rastrear reativações.
 
 
 --------------------------------------------------------------------------------
@@ -1753,9 +1770,11 @@ GET    /relatorios/blacklist
 
 --- BLACKLIST ---
 GET    /blacklist/
+GET    /blacklist/exportar-excel
 POST   /blacklist/
+POST   /blacklist/check
 DELETE /blacklist/{id}
-POST   /blacklist/{id}/reativar
+POST   /blacklist/import
 
 
 ================================================================================

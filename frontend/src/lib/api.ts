@@ -486,6 +486,9 @@ export const importarBlacklist = (file: File) => {
   return api.post("/blacklist/import", fd).then((r) => r.data);
 };
 
+export const exportarBlacklistExcel = () =>
+  api.get("/blacklist/exportar-excel", { responseType: "blob" }).then((r) => r.data as Blob);
+
 // ── Busca Global ──────────────────────────────────────────────────────────────
 
 export const buscarContrato = (numero: string) =>

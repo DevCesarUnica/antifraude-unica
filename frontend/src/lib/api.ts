@@ -72,6 +72,9 @@ export const getPropostasDashboard = (params?: {
   limit?: number;
 }) => api.get("/propostas/dashboard", { params }).then((r) => r.data);
 
+export const exportarPropostasExcel = () =>
+  api.get("/propostas/exportar-excel", { responseType: "blob" }).then((r) => r.data as Blob);
+
 // ── Regras ────────────────────────────────────────────────────────────────────
 
 export const getRegras = (ativo?: boolean) =>
@@ -283,6 +286,30 @@ export const importarCorretoresCSV = (file: File) => {
 
 export const getHistoricoImportacoesCorretores = () =>
   api.get("/corretores/importacoes/historico").then((r) => r.data);
+
+interface ExportacaoCorretoresParams {
+  nome?: string;
+  codigo?: string;
+  status?: string;
+  origem?: string;
+}
+
+export interface StatusExportacaoCorretores {
+  status: "em_andamento" | "concluido" | "erro";
+  percentual: number;
+  paginas_processadas: number;
+  paginas_totais: number;
+  erro: string | null;
+}
+
+export const iniciarExportacaoCorretores = (params?: ExportacaoCorretoresParams) =>
+  api.post("/corretores/exportar-excel/iniciar", null, { params }).then((r) => r.data as { job_id: string });
+
+export const statusExportacaoCorretores = (jobId: string) =>
+  api.get(`/corretores/exportar-excel/status/${jobId}`).then((r) => r.data as StatusExportacaoCorretores);
+
+export const baixarExportacaoCorretores = (jobId: string) =>
+  api.get(`/corretores/exportar-excel/download/${jobId}`, { responseType: "blob" }).then((r) => r.data as Blob);
 
 // ── Grupos ────────────────────────────────────────────────────────────────────
 

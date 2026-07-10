@@ -128,10 +128,14 @@ def query_dashboard(
     order_dir: str = "desc",
     skip: int = 0,
     limit: int = 50,
+    aplicar_limite_maximo: bool = True,
 ) -> tuple[list[dict], int]:
     """
     Executa a query do dashboard com filtros, ordenação e paginação.
     Retorna (items_normalizados, total_sem_paginacao).
+
+    `aplicar_limite_maximo=False` remove o teto de 200 registros — usado pela
+    exportação Excel, que precisa trazer todas as propostas filtradas de uma vez.
     """
     from app.models import Corretor
 
@@ -164,7 +168,9 @@ def query_dashboard(
     col = col_fn()
     ordenado = col.desc() if order_dir.lower() != "asc" else col.asc()
 
-    limit_safe = min(limit, 200)
-    items = q.order_by(ordenado).offset(skip).limit(limit_safe).all()
+    q = q.order_by(ordenado).offset(skip)
+    if aplicar_limite_maximo:
+        q = q.limit(min(limit, 200))
+    items = q.all()
 
     return [normalizar_proposta(p) for p in items], total

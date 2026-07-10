@@ -4,6 +4,7 @@ import {
   getCorretoresUnificados,
   criarCorretor, atualizarCorretor, desativarCorretor,
   getGrupos, importarCorretoresCSV,
+  iniciarExportacaoCorretores, statusExportacaoCorretores, baixarExportacaoCorretores,
 } from "../lib/api";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -99,6 +100,13 @@ export default function CorretoresPage() {
   const [form,        setForm]        = useState(EMPTY_FORM);
   const [erroModal,   setErroModal]   = useState("");
   const [importando,  setImportando]  = useState(false);
+  const [exportando,  setExportando]  = useState(false);
+  const [exportPct,   setExportPct]   = useState(0);
+  const exportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => () => {
+    if (exportPollRef.current) clearInterval(exportPollRef.current);
+  }, []);
 
   const sincronizandoRef = useRef(false);
 
@@ -231,6 +239,49 @@ export default function CorretoresPage() {
     }
   };
 
+  const exportarExcel = async () => {
+    setExportando(true); setExportPct(0);
+    try {
+      const { job_id } = await iniciarExportacaoCorretores({
+        nome: buscaNome || undefined,
+        codigo: buscaCodigo || undefined,
+        status: buscaStatus || undefined,
+        origem: buscaOrigem || undefined,
+      });
+
+      exportPollRef.current = setInterval(async () => {
+        try {
+          const st = await statusExportacaoCorretores(job_id);
+          setExportPct(st.percentual);
+
+          if (st.status === "concluido") {
+            if (exportPollRef.current) clearInterval(exportPollRef.current);
+            const blob = await baixarExportacaoCorretores(job_id);
+            const pad = (n: number) => String(n).padStart(2, "0");
+            const agora = new Date();
+            const nomeArquivo = `corretores_${agora.getFullYear()}-${pad(agora.getMonth() + 1)}-${pad(agora.getDate())}_${pad(agora.getHours())}-${pad(agora.getMinutes())}.xlsx`;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = nomeArquivo; a.click();
+            URL.revokeObjectURL(url);
+            setExportando(false);
+          } else if (st.status === "erro") {
+            if (exportPollRef.current) clearInterval(exportPollRef.current);
+            alert(st.erro ?? "Erro ao exportar corretores");
+            setExportando(false);
+          }
+        } catch {
+          if (exportPollRef.current) clearInterval(exportPollRef.current);
+          alert("Erro ao acompanhar a exportação");
+          setExportando(false);
+        }
+      }, 1000);
+    } catch {
+      alert("Erro ao iniciar a exportação");
+      setExportando(false);
+    }
+  };
+
   // ── Formatações ─────────────────────────────────────────────────────────────
 
   const formatarSyncEm = (iso: string | null) => {
@@ -287,6 +338,16 @@ export default function CorretoresPage() {
                 {importando ? "Importando..." : "Importar CSV"}
               </span>
             </label>
+
+            {/* Exportar Excel */}
+            <button
+              onClick={exportarExcel}
+              disabled={exportando}
+              className="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wide disabled:opacity-50"
+              style={{ backgroundColor: "rgba(22,163,74,0.15)", color: "#16a34a", border: "1px solid rgba(22,163,74,0.3)" }}
+            >
+              {exportando ? `Exportando... ${exportPct}%` : "⬇ Baixar Excel"}
+            </button>
 
             {/* Novo corretor */}
             <button

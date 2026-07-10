@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getPropostaSummary } from "@/lib/api";
+import { getPropostaSummary, exportarPropostasExcel } from "@/lib/api";
 import Layout from "@/components/Layout";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import DashboardPropostasTable from "@/components/DashboardPropostasTable";
@@ -35,6 +36,27 @@ export default function DashboardPage() {
     queryFn: getPropostaSummary,
     refetchInterval: 10_000,
   });
+
+  const [exportando, setExportando] = useState(false);
+  const [erroExport, setErroExport] = useState("");
+
+  const exportarExcel = async () => {
+    setExportando(true); setErroExport("");
+    try {
+      const blob = await exportarPropostasExcel();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const agora = new Date();
+      const nomeArquivo = `propostas_${agora.getFullYear()}-${pad(agora.getMonth() + 1)}-${pad(agora.getDate())}_${pad(agora.getHours())}-${pad(agora.getMinutes())}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = nomeArquivo; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setErroExport("Erro ao exportar propostas.");
+    } finally {
+      setExportando(false);
+    }
+  };
 
   const analisar      = (summary?.em_analise ?? 0) + (summary?.analise_manual ?? 0);
   const aprovadas     = (summary?.aprovadas ?? 0) + (summary?.confirmadas_banco ?? 0);
@@ -102,6 +124,22 @@ export default function DashboardPage() {
                 Mesa de Crédito
               </h2>
               <DashboardPropostasTable />
+            </div>
+
+            <div className="flex flex-col items-end gap-2">
+              {erroExport && (
+                <p className="text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "rgba(239,68,68,0.08)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)" }}>
+                  {erroExport}
+                </p>
+              )}
+              <button
+                onClick={exportarExcel}
+                disabled={exportando}
+                className="px-4 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-50"
+                style={{ backgroundColor: "#16a34a" }}
+              >
+                {exportando ? "Exportando..." : "⬇ Baixar Excel de todas as propostas"}
+              </button>
             </div>
           </>
         )}

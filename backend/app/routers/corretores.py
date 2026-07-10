@@ -2,10 +2,16 @@
 Router de corretores — CRUD completo + contatos + importação CSV + visão unificada Storm.
 """
 
+import asyncio
 import csv
 import io
+import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request, Query
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 
@@ -145,6 +151,196 @@ async def listar_corretores_unificados(
         "paginacao_storm": paginacao_storm,
         "sync_em": sync_em,
     }
+
+
+# ── Exportação Excel (assíncrona, com progresso) ─────────────────────────────
+# Mesmos filtros do endpoint unificado, mas percorre TODAS as páginas da Storm
+# (não só a página atual) para trazer a base completa.
+#
+# A busca completa na Storm pode levar minutos (rate limit de 20 req/min +
+# retries), então roda em background: `iniciar` devolve um job_id na hora,
+# o front consulta `status/{job_id}` periodicamente para mostrar % concluído,
+# e baixa o arquivo em `download/{job_id}` quando `status == concluido`.
+#
+# Estado em memória — assume processo único de dev/produção (sem múltiplos
+# workers). Jobs concluídos são removidos do dicionário após o download.
+
+_COLUNAS_EXCEL_CORRETORES = ["Código", "Nome", "E-mail", "Status", "Tipo", "Origem", "Loja/Sala", "Privilégio", "Criado Em"]
+_LARGURAS_EXCEL_CORRETORES = [16, 28, 28, 10, 22, 10, 20, 20, 18]
+
+# Trava de segurança contra loop indefinido caso a Storm devolva `last_page`
+# inconsistente entre chamadas.
+_STORM_MAX_PAGINAS = 2000
+
+_EXPORT_JOBS: dict[str, dict] = {}
+
+
+def _montar_workbook_corretores(itens: list[dict], storm_indisponivel: bool) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Corretores"
+
+    ws.append(_COLUNAS_EXCEL_CORRETORES)
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="DC2626", end_color="DC2626", fill_type="solid")
+    for col_idx in range(1, len(_COLUNAS_EXCEL_CORRETORES) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    for item in itens:
+        ws.append([
+            item["codigo"],
+            item["nome"],
+            item["email"] or "",
+            item["status"].upper(),
+            item["tipo"] or "",
+            item["origem"].upper(),
+            item["loja"] or "",
+            item["privilegio"] or "",
+            item["criado_em"] or "",
+        ])
+
+    ws.auto_filter.ref = ws.dimensions
+    ws.freeze_panes = "A2"
+    for col_idx, largura in enumerate(_LARGURAS_EXCEL_CORRETORES, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = largura
+
+    if storm_indisponivel:
+        ws2 = wb.create_sheet("Avisos")
+        ws2.append(["Colaboradores Storm indisponíveis no momento da exportação — lista abaixo inclui apenas corretores internos."])
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+async def _executar_exportacao_corretores(
+    job_id: str,
+    nome: str | None,
+    codigo: str | None,
+    status_filtro: str | None,
+    origem: str | None,
+) -> None:
+    from app.database import SessionLocal
+    from app.services.storm import StormService, StormAPIError
+
+    job = _EXPORT_JOBS[job_id]
+    db = SessionLocal()
+    try:
+        itens: list[dict] = []
+
+        if origem in (None, "interno"):
+            q = db.query(Corretor).options(joinedload(Corretor.grupo))
+            if nome:
+                q = q.filter(Corretor.nome.ilike(f"%{nome}%"))
+            if codigo:
+                codigo_limpo = codigo.replace(".", "").replace("-", "").strip()
+                q = q.filter(
+                    (Corretor.cpf == codigo_limpo) |
+                    (Corretor.codigo_externo.ilike(f"%{codigo}%"))
+                )
+            if status_filtro == "ativo":
+                q = q.filter(Corretor.ativo == True)  # noqa: E712
+            elif status_filtro == "inativo":
+                q = q.filter(Corretor.ativo == False)  # noqa: E712
+            internos = q.order_by(Corretor.nome.asc()).all()
+            itens.extend(_normalize_interno(c) for c in internos)
+
+        storm_indisponivel = False
+        if origem in (None, "storm"):
+            status_usuario: str | None = None
+            if status_filtro == "ativo":
+                status_usuario = "1"
+            elif status_filtro == "inativo":
+                status_usuario = "0"
+
+            try:
+                async with StormService() as storm:
+                    pagina = 1
+                    paginas_totais = 1
+                    while pagina <= paginas_totais and pagina <= _STORM_MAX_PAGINAS:
+                        res = await storm.get_colaboradores(
+                            pagina=pagina,
+                            usuario=codigo or None,
+                            status_usuario=status_usuario,
+                        )
+                        for raw in res.get("data") or []:
+                            norm = _normalize_storm(raw)
+                            if nome and nome.lower() not in (norm["nome"] or "").lower():
+                                continue
+                            itens.append(norm)
+                        paginas_totais = res.get("last_page", 1)
+                        job["paginas_processadas"] = pagina
+                        job["paginas_totais"] = paginas_totais
+                        pagina += 1
+            except StormAPIError:
+                storm_indisponivel = True
+
+        job["arquivo"] = _montar_workbook_corretores(itens, storm_indisponivel)
+        job["nome_arquivo"] = f"corretores_{datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M')}.xlsx"
+        job["status"] = "concluido"
+    except Exception as exc:
+        job["status"] = "erro"
+        job["erro"] = str(exc)
+    finally:
+        db.close()
+
+
+@router.post("/exportar-excel/iniciar")
+async def iniciar_exportacao_corretores(
+    nome: str | None = None,
+    codigo: str | None = None,
+    status_filtro: str | None = Query(None, alias="status"),
+    origem: str | None = None,
+):
+    job_id = str(uuid.uuid4())
+    _EXPORT_JOBS[job_id] = {
+        "status": "em_andamento",
+        "paginas_processadas": 0,
+        "paginas_totais": 1,
+        "erro": None,
+        "arquivo": None,
+        "nome_arquivo": None,
+    }
+    asyncio.create_task(_executar_exportacao_corretores(job_id, nome, codigo, status_filtro, origem))
+    return {"job_id": job_id}
+
+
+@router.get("/exportar-excel/status/{job_id}")
+def status_exportacao_corretores(job_id: str):
+    job = _EXPORT_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job de exportação não encontrado ou já expirado")
+    total = max(job["paginas_totais"], 1)
+    percentual = 100 if job["status"] == "concluido" else min(99, int(job["paginas_processadas"] / total * 100))
+    return {
+        "status": job["status"],
+        "percentual": percentual,
+        "paginas_processadas": job["paginas_processadas"],
+        "paginas_totais": job["paginas_totais"],
+        "erro": job["erro"],
+    }
+
+
+@router.get("/exportar-excel/download/{job_id}")
+def download_exportacao_corretores(job_id: str):
+    job = _EXPORT_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job de exportação não encontrado ou já expirado")
+    if job["status"] != "concluido":
+        raise HTTPException(status_code=409, detail="Exportação ainda não concluída")
+
+    buffer = io.BytesIO(job["arquivo"])
+    nome_arquivo = job["nome_arquivo"]
+    del _EXPORT_JOBS[job_id]
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────

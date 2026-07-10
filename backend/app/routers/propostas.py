@@ -6,8 +6,13 @@ Idempotência via proposta_id_externo:
   em vez de criar duplicata.
 """
 
-from datetime import datetime
+import io
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -217,6 +222,117 @@ def search_propostas(
             items.append(normalizar_proposta(p))
 
     return {"query": q_clean, "total": len(items), "items": items}
+
+
+# ── Exportação Excel ──────────────────────────────────────────────────────────
+# Aceita os mesmos filtros do painel do dashboard. Sem filtros, exporta todas
+# as propostas atuais.
+
+_COLUNAS_EXCEL_PROPOSTAS = [
+    "ADE", "Origem", "Banco", "Convênio", "Produto", "Corretor", "Valor", "Status",
+    "CPF", "Nome Cliente", "UF", "Observações", "Score Fraude", "Data Importação", "Data Atualização",
+]
+_LARGURAS_EXCEL_PROPOSTAS = [16, 10, 16, 22, 22, 22, 14, 16, 16, 30, 6, 40, 12, 18, 18]
+
+
+def _fmt_data_excel_proposta(dt) -> str:
+    return dt.strftime("%d/%m/%Y %H:%M") if dt else ""
+
+
+def _fmt_cpf_excel(cpf: str | None) -> str:
+    if not cpf:
+        return ""
+    digits = "".join(ch for ch in cpf if ch.isdigit())
+    if len(digits) == 11:
+        return f"{digits[0:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:11]}"
+    return cpf
+
+
+@router.get("/exportar-excel")
+def exportar_excel(
+    request: Request,
+    banco: str | None = None,
+    status: str | None = None,
+    cpf: str | None = None,
+    nome: str | None = None,
+    corretor: str | None = None,
+    valor_min: float | None = None,
+    valor_max: float | None = None,
+    data_inicio: datetime | None = None,
+    data_fim: datetime | None = None,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
+    items, total = query_dashboard(
+        db,
+        banco=banco, status=status, cpf=cpf, nome=nome, corretor=corretor,
+        valor_min=valor_min, valor_max=valor_max,
+        data_inicio=data_inicio, data_fim=data_fim,
+        order_by="criado_em", order_dir="desc",
+        skip=0,
+        aplicar_limite_maximo=False,
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Propostas"
+
+    ws.append(_COLUNAS_EXCEL_PROPOSTAS)
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="DC2626", end_color="DC2626", fill_type="solid")
+    for col_idx in range(1, len(_COLUNAS_EXCEL_PROPOSTAS) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    for item in items:
+        ws.append([
+            item["ade"],
+            item["origem"],
+            item["banco"],
+            item["convenio"] or "",
+            item["produto"] or "",
+            item["corretor"] or "",
+            item["valor"] or 0,
+            item["status"],
+            _fmt_cpf_excel(item["cpf"]),
+            item["nome_cliente"] or "",
+            item["uf_cliente"] or "",
+            item["observacoes"] or "",
+            item["score_fraude"] if item["score_fraude"] is not None else "",
+            _fmt_data_excel_proposta(item["data_importacao"]),
+            _fmt_data_excel_proposta(item["data_atualizacao"]),
+        ])
+
+    ws.auto_filter.ref = ws.dimensions
+    ws.freeze_panes = "A2"
+    for col_idx, largura in enumerate(_LARGURAS_EXCEL_PROPOSTAS, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = largura
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    nome_arquivo = f"propostas_{datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M')}.xlsx"
+
+    log_auditoria(
+        db,
+        acao=f"PROPOSTAS_EXPORTADAS: exportou {total} proposta(s) para Excel",
+        usuario=usuario,
+        request=request,
+        tipo_entidade="proposta",
+        entidade_id=None,
+        depois={"evento": "PROPOSTAS_EXPORTADAS", "quantidade": total, "arquivo": nome_arquivo},
+        risco="BAIXO",
+    )
+    db.commit()
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome_arquivo}"'},
+    )
 
 
 # ── Individual ────────────────────────────────────────────────────────────────

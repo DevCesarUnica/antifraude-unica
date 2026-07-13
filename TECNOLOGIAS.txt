@@ -29,6 +29,17 @@ FILAS E TAREFAS ASSÍNCRONAS
   - Celery 5.4.0             Fila de tarefas distribuídas
   - Redis 5.0.7              Broker de mensagens para o Celery
   - Flower 2.0.1             Dashboard de monitoramento do Celery
+  NOTA: o beat_schedule do Celery (workers/celery_app.py) não roda de
+  fato em nenhum ambiente — não existe serviço `celery beat` no
+  docker-compose nem em dev. A tarefa "varredura-propostas-pendentes"
+  (resgate de propostas travadas) segue com esse problema.
+
+AGENDAMENTO INTERNO
+  - APScheduler 3.10.4       Agendador in-process dentro do próprio backend
+                             FastAPI (core/scheduler.py) — não depende de
+                             Celery Beat/worker. Hoje dispara o sync
+                             automático com a Titan (~10s após o backend
+                             subir, a cada 2h, e à meia-noite).
 
 AUTENTICAÇÃO E SEGURANÇA
   - python-jose 3.3.0        Geração e validação de tokens JWT
@@ -116,6 +127,8 @@ PADRÕES ARQUITETURAIS
   - REST API                         Backend FastAPI com endpoints JSON (porta 8000)
   - ORM + Migrations                 SQLAlchemy + Alembic
   - Task Queue                       Celery + Redis para processamento assíncrono
+  - Scheduler in-process              APScheduler dentro do processo FastAPI — sync
+                                      automático com a Titan sem depender de worker/beat
   - JWT Authentication               Token Bearer em localStorage, expiração 8h
   - Circuit Breaker                  Padrão de resiliência para APIs externas
   - Retry + Backoff                  tenacity em todas as chamadas às APIs externas

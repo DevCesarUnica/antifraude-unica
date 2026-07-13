@@ -82,11 +82,13 @@ O SISTEMA NÃO:
 
 CENÁRIO TÍPICO DO DIA A DIA:
 
-  8h00 — Gestor faz o sync matinal:
-    → Acessa http://localhost:3000
-    → Swagger ou um botão na tela → POST /titan/sync e /storm/sync
-    → O sistema importa todos os contratos novos dos bancos parceiros
-    → Motor antifraude processa cada um automaticamente
+  8h00 — Backend sobe e já sincroniza sozinho com o Hope/Titan:
+    → core/scheduler.py dispara o sync ~10s após o processo subir,
+      de novo a cada 2h enquanto estiver ativo, e à meia-noite
+      (não depende de ninguém clicar em nada nem de Celery Beat)
+    → Motor antifraude processa cada proposta importada automaticamente
+    → Storm ainda não tem agendamento — se precisar, chamar
+      POST /storm/sync manualmente (Swagger ou botão na tela)
 
   8h10 — Dashboard mostra os KPIs:
     → Card "ANALISAR": 47 propostas aguardando revisão humana
@@ -206,7 +208,10 @@ antifraude/
 │   ├── schemas.py        → Validação de entrada/saída (Pydantic).
 │   ├── core/
 │   │   ├── config.py     → Lê .env. Use settings.xxx em qualquer lugar.
-│   │   └── circuit_breaker.py → Proteção contra cascata de erros externos.
+│   │   ├── circuit_breaker.py → Proteção contra cascata de erros externos.
+│   │   └── scheduler.py  → Agendador interno (APScheduler). Sync automático
+│   │        com a Titan: ~10s após subir, a cada 2h, e à meia-noite.
+│   │        Não depende de Celery Beat/worker.
 │   ├── routers/          → Um arquivo por recurso REST.
 │   │   ├── auth.py       → /auth/login, /auth/me
 │   │   ├── propostas.py  → /propostas/* (CRUD + dashboard + search)
@@ -253,6 +258,8 @@ antifraude/
 PONTO DE ENTRADA: backend/app/main.py
   Cria o app FastAPI, registra todos os routers, configura CORS e middleware.
   Para adicionar um novo router: importe e chame app.include_router().
+  No lifespan, também chama iniciar_scheduler()/parar_scheduler()
+  (core/scheduler.py) — é isso que liga o sync automático da Titan.
 
 CONFIGURAÇÃO: backend/app/core/config.py
   Toda configuração vem do arquivo backend/.env via pydantic-settings.
@@ -588,6 +595,14 @@ SYNC (importar contratos para o banco local):
   POST /titan/sync → titan_sync.py → hope_adapter.py → cria Proposta
   Idempotente: "titan-{id}" já existe → ignora.
   Motor antifraude roda para cada proposta importada.
+
+  Desde core/scheduler.py, esse sync também dispara sozinho, sem
+  chamada manual: ~10s após o backend subir, a cada 2h enquanto o
+  processo estiver ativo, e à meia-noite (America/Sao_Paulo). Roda
+  dentro do próprio processo FastAPI (APScheduler) — diferente da
+  tarefa "varredura" abaixo, NÃO depende de Celery Beat/worker.
+  O POST /titan/sync manual continua existindo, útil para forçar uma
+  sincronização imediata fora do ciclo automático.
 
 ADAPTER: services/hope_adapter.py
   Converte o formato da API Titan para PropostaCreate.
@@ -934,9 +949,14 @@ PROBLEMA 8: CORS em desenvolvimento
 
 PROBLEMA 9: Proposta travada em EM_ANALISE
   Causa: motor travou (crash, timeout) antes de atualizar o status.
-  Solução (Celery Beat, 5 min): varredura() em workers/tasks.py marca
-    EM_ANALISE travadas há mais de 10 min como ERRO.
-  Em dev (sem Celery): usar POST /propostas/{id}/reprocessar manualmente.
+  Solução no código (Celery Beat, 5 min): varredura() em workers/tasks.py
+    marcaria EM_ANALISE travadas há mais de 10 min como ERRO — mas essa
+    tarefa NÃO roda de fato em nenhum ambiente hoje (não existe serviço
+    `celery beat` no docker-compose nem em dev; diferente do sync da
+    Titan, que foi migrado para core/scheduler.py, esta tarefa continua
+    dependendo de um `celery beat` que nunca foi configurado).
+  Na prática (dev e prod atuais): usar POST /propostas/{id}/reprocessar
+    manualmente quando encontrar uma proposta travada.
 
 
 ================================================================================

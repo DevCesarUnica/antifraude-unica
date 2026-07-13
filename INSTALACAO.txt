@@ -228,18 +228,22 @@ Usuários disponíveis para login:
 
 
 ================================================================================
-  SINCRONIA COM BANCOS PARCEIROS (OPCIONAL)
+  SINCRONIA COM BANCOS PARCEIROS
 ================================================================================
 
-Para importar contratos das integrações externas:
+HOPE (Titan) — AUTOMÁTICO:
+  O backend já sincroniza sozinho (core/scheduler.py, sem precisar de
+  Celery Beat/worker): ~10s depois de o backend subir, a cada 2h
+  enquanto o processo estiver ativo, e à meia-noite. Não precisa
+  chamar nada manualmente no dia a dia.
 
-  IMPORTAR PROPOSTAS DO HOPE (Titan):
+  Para forçar uma sincronização imediata (fora do ciclo automático):
     Acessar: http://localhost:8000/docs
     Endpoint: POST /titan/sync
     Body (JSON): { "max_pages": 50 }
     Retorna: { "importadas": N, "ignoradas": N, "erros": N }
 
-  IMPORTAR CONTRATOS DA STORM:
+  IMPORTAR CONTRATOS DA STORM (ainda manual, sem agendamento):
     Endpoint: POST /storm/sync
     Body (JSON): { "max_paginas": 50 }
     Retorna: { "importadas": N, "ignoradas": N, "erros": N }

@@ -305,10 +305,15 @@ estou construindo.
     ./antifraude/view_importacao_propostas_antifraude_novo.php
     WebDeck importa via upload manual de CSV por banco (Daycoval, BMG,
     etc.) + robô RPA pra login (botão "BMG Robô - Liberar login"). Meu
-    sistema já faz sync automático via API pro Hope/Storm — estrategicamente
-    melhor pros bancos que já tenho integrados. Não é algo a "copiar";
-    são estratégias de integração diferentes pra situações diferentes
-    (o WebDeck cobre bancos sem API disponível via CSV/RPA).
+    sistema já faz sync automático via API pro Hope/Titan — de fato
+    automático desde que criei core/scheduler.py (roda ~10s após o
+    backend subir, a cada 2h, e à meia-noite; antes disso só existia
+    POST /titan/sync manual, sem nenhum agendamento funcionando de
+    verdade). O Storm continua exigindo POST /storm/sync manual, sem
+    agendamento — estrategicamente melhor pros bancos que já tenho
+    integrados de fato via API. Não é algo a "copiar"; são estratégias
+    de integração diferentes pra situações diferentes (o WebDeck cobre
+    bancos sem API disponível via CSV/RPA).
 
   Retornos de banco
     ./antifraude/view_mapear_retornos_aprovacoes_banco.php
@@ -334,8 +339,11 @@ estou construindo.
     - Coverage de mais bancos (via CSV/RPA), embora de forma manual.
 
   Onde meu sistema já é mais rico / mais moderno:
-    - Sync automático via API para Hope/Storm (WebDeck depende de upload
-      manual de CSV ou robô RPA para a maioria dos bancos).
+    - Sync automático via API para Hope/Titan, sem intervenção manual
+      (core/scheduler.py: ~10s após subir o backend, a cada 2h, e à
+      meia-noite). Storm ainda depende de POST /storm/sync manual.
+      WebDeck depende de upload manual de CSV ou robô RPA para a
+      maioria dos bancos.
     - Esteiras Comerciais com KPIs, busca e drawer de vínculos (WebDeck
       só tem lista simples).
     - Shadow Mode por regra, simulador de regras sem afetar produção,

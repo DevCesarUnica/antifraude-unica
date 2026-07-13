@@ -14,6 +14,7 @@ interface IntegracaoDetalhe {
   visaoGeral: string[];
   autenticacao: string[];
   endpoints: Endpoint[];
+  envioAprovadas: string[];
   resiliencia: string[];
   cache: string[];
   sincronizacao: string[];
@@ -24,11 +25,12 @@ export const DETALHES_INTEGRACAO: Record<string, IntegracaoDetalhe> = {
   hope: {
     resumo:
       "Integração via API REST com a plataforma Titan, operada pela Ceoslab em nome do banco Hope. " +
-      "Fornece dados de referência e consulta de operações; não realiza o envio de propostas.",
+      "Fornece dados de referência, consulta de operações e o registro formal de propostas já aprovadas internamente.",
     explicacaoSimples: [
-      "Pense nesta integração como uma ponte automática entre o nosso sistema e o banco Hope. Ela busca, prontas, informações que o Hope disponibiliza — como quais produtos existem, profissões e estados civis aceitos — para ajudar a preencher uma proposta corretamente, e também permite consultar o andamento de operações que já foram enviadas.",
-      "Ela não envia a proposta para o banco sozinha. Quem faz esse envio final é um robô separado, fora desta integração — aqui só entram dados de apoio e consulta.",
-      "Importante: até o momento, esta API não permite aprovar ou recusar uma proposta diretamente no Hope. Essa decisão continua sendo feita aqui dentro do nosso sistema, pelo motor antifraude e pela equipe de análise.",
+      "Pense nesta integração como uma ponte de mão dupla com o banco Hope. De um lado, ela busca informações prontas do Hope — como produtos, profissões e estados civis aceitos — para ajudar a preencher uma proposta corretamente, e permite consultar o andamento de operações já existentes.",
+      "Do outro lado, quando uma proposta já foi aprovada aqui dentro do nosso sistema, esta integração é usada para formalizar isso junto ao Hope: com um clique no botão \"Enviar ao Banco\", ela envia os dados financeiros e do cliente para o Hope registrar a operação.",
+      "Importante: quem decide se uma proposta é aprovada, bloqueada ou vai para análise manual é sempre o nosso próprio sistema — o motor antifraude e a equipe de análise. A Titan não tem, até o momento, nenhuma função para avaliar e aprovar ou recusar uma proposta por conta própria; ela apenas registra a decisão que já tomamos por aqui.",
+      "Esse envio automático hoje funciona de ponta a ponta para propostas que já vieram do próprio Hope. Propostas de outras origens ainda não têm esse suporte completo.",
       "Todos os dias, de forma automática (sem ninguém precisar clicar em nada), o sistema verifica se chegaram novas operações no Hope e já traz elas para dentro da nossa base.",
       "Se o Hope ficar fora do ar por algum motivo, o sistema tem uma espécie de \"memória recente\" das últimas informações e continua funcionando normalmente por um tempo com base nela, até a conexão voltar.",
       "O selo \"Ativo\" mostrado no card significa que essa conexão está configurada e funcionando normalmente agora.",
@@ -49,7 +51,14 @@ export const DETALHES_INTEGRACAO: Record<string, IntegracaoDetalhe> = {
       { metodo: "GET",  caminho: "/{banco_id}/operations/products",  descricao: "Produtos disponíveis por banco (inclui Daycoval)." },
       { metodo: "GET",  caminho: "/operations",                      descricao: "Consulta paginada de operações, com filtro por status e por intervalo de datas." },
       { metodo: "GET",  caminho: "/operations/{id}",                 descricao: "Detalhe de uma operação específica pelo ID Titan." },
-      { metodo: "POST", caminho: "/operations/create",                descricao: "Criação de operação no motor de cálculo Titan." },
+      { metodo: "POST", caminho: "/operations/create",                descricao: "Registra no Titan uma operação já aprovada internamente (não avalia nem decide sobre o crédito)." },
+    ],
+    envioAprovadas: [
+      "Depois que uma proposta chega ao status APROVADA dentro do sistema, o botão \"Enviar ao Banco\" fica disponível. Ao clicar, o sistema monta automaticamente o payload completo (dados do cliente, parcelas, juros, IOF, CET) e chama POST /operations/create — já com o status da operação marcado como aprovado, pois essa decisão já foi tomada por aqui.",
+      "Para propostas que vieram originalmente do Hope, todos os dados financeiros necessários já estão salvos desde a importação, então o envio é automático de ponta a ponta. Propostas de outras origens (Storm ou cadastro manual) ainda não têm esse suporte completo e o envio retorna erro pedindo os dados financeiros.",
+      "Cada envio carrega uma chave de idempotência única (hash dos dados da operação). Se a mesma proposta for enviada de novo — por exemplo após um timeout — o Titan reconhece que já existe e devolve a operação já criada, em vez de duplicá-la.",
+      "Uma recusa do Titan nesta etapa (HTTP 400/422) é uma rejeição do registro em si — dado inválido ou regra de negócio da Titan — e não uma reavaliação da decisão de crédito, que já havia sido tomada dentro do nosso sistema antes desse envio.",
+      "Falhas de servidor (5xx) ou timeout acionam nova tentativa automática com backoff (2s, 4s, 8s) usando a mesma chave de idempotência.",
     ],
     resiliencia: [
       "Circuit breaker dedicado: após 5 falhas consecutivas o circuito abre e passa a rejeitar chamadas imediatamente por 60s, evitando sobrecarregar uma API já instável; decorrido esse tempo, uma chamada de teste é permitida (half-open) antes de fechar o circuito novamente.",
@@ -68,8 +77,8 @@ export const DETALHES_INTEGRACAO: Record<string, IntegracaoDetalhe> = {
       "A sincronização é idempotente: operações já importadas (por ID externo da Titan) são identificadas e ignoradas, então rodar o job várias vezes ao dia é seguro.",
     ],
     limitacoes: [
-      "Não existe endpoint de envio/submissão de proposta na API Titan — ela fornece apenas dados de referência e consulta. O envio efetivo da proposta ao banco Hope é feito por robô de RPA, fora desta integração.",
-      "A API Titan também não oferece, até o momento, nenhum endpoint para aprovar ou recusar uma proposta. A decisão de crédito (aprovação, bloqueio ou análise manual) é tratada inteiramente pelo motor antifraude e pela equipe de análise dentro deste sistema, sem retorno automático dessa decisão ao Hope.",
+      "A API Titan não avalia nem decide sobre uma proposta — não existe endpoint para pedir a ela que aprove ou recuse um pedido de crédito. A decisão (aprovação, bloqueio ou análise manual) é tomada inteiramente pelo motor antifraude e pela equipe de análise dentro deste sistema; o envio ao Titan só acontece depois, para registrar formalmente uma operação que já foi aprovada por aqui.",
+      "O envio automático de propostas aprovadas só funciona de ponta a ponta para propostas que já vieram do próprio Hope (via sincronização) — elas trazem consigo todos os dados financeiros necessários. Propostas de outras origens (Storm ou cadastradas manualmente) ainda não têm esse suporte: o envio retorna erro pedindo esses dados.",
       "A chave de API é única e global para toda a integração — não há segregação de escopo ou permissões por usuário/perfil dentro da própria Titan.",
       "A sincronização de operações é por polling (varredura periódica), não em tempo real — uma operação criada na Titan pode levar até o próximo ciclo do job para aparecer no sistema.",
     ],
@@ -213,6 +222,7 @@ export default function IntegracaoDetalheModal({ slug, nome, ativo, tipo, onClos
                 </div>
               </section>
 
+              <Secao titulo="Envio de Propostas Aprovadas" itens={detalhe.envioAprovadas} />
               <Secao titulo="Resiliência & Performance" itens={detalhe.resiliencia} />
               <Secao titulo="Cache" itens={detalhe.cache} />
               <Secao titulo="Sincronização Automática" itens={detalhe.sincronizacao} />

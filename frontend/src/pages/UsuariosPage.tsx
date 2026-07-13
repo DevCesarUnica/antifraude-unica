@@ -56,10 +56,6 @@ export default function UsuariosPage() {
     return false;
   };
 
-  const BADGE_PERFIL: Record<string, string> = {
-    admin: "#DC2626", gestor: "#f97316", supervisor: "#a855f7", analista: "#3b82f6",
-  };
-
   return (
     <Layout>
       <div className="flex flex-col gap-4">

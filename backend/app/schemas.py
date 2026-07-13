@@ -63,6 +63,13 @@ class PropostaOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PropostasListaResponse(BaseModel):
+    items: list[PropostaOut]
+    total: int
+    skip: int
+    limit: int
+
+
 class PropostaSummary(BaseModel):
     total: int
     enfileiradas: int

@@ -201,31 +201,34 @@ sem alerta a ninguém.
   a API Titan falha, `_get()` cacheia a resposta **mock** por 300s. Mesmo
   depois do Titan voltar, chamadas dentro dessa janela continuam recebendo
   dado mock, sem invalidação automática — só `DELETE /titan/cache` manual.
-- **A2 — `_auto_mapear_convenio` sem tratamento de corrida.**
-  `antifraude.py:152-166` faz SELECT-then-INSERT em `Convenio` (que tem
+- **A2 — ✅ CORRIGIDO** — `_auto_mapear_convenio` sem tratamento de corrida.
+  `antifraude.py:152-166` fazia SELECT-then-INSERT em `Convenio` (que tem
   `UNIQUE(nome)`) sem `try/except IntegrityError`. Duas propostas
   concorrentes com convênio novo idêntico (dois workers Celery, ou duas
-  syncs simultâneas) fazem a segunda estourar `IntegrityError` não tratado,
-  que sobe até `_processar_sync` (também sem try/except ao redor do motor)
-  e deixa a proposta **presa em `EM_ANALISE`**. Desde a correção do A9, o
-  robô de varredura (agora em `core/scheduler.py`) marca essa proposta
-  como `ERRO` após 10 min — visível e reprocessável manualmente via
-  `/reprocessar`, mas o `IntegrityError` em si continua sem tratamento
-  (a causa raiz deste A2 não foi corrigida, só deixou de ficar invisível).
+  syncs simultâneas) faziam a segunda estourar `IntegrityError` não
+  tratado, deixando a proposta presa em `EM_ANALISE`. Corrigido com
+  `self._db.begin_nested()` (SAVEPOINT) em volta do INSERT — em caso de
+  `IntegrityError` (corrida confirmada, convênio já existe), o savepoint é
+  revertido automaticamente e o processamento segue normalmente, sem subir
+  a exceção para `_processar_sync`.
 - **A3 — Header HTTP arbitrário usado como autoria.** `corretores.py:271`,
   `importacoes.py:59`: `criado_por=request.headers.get("x-usuario")` —
   qualquer chamador pode forjar `X-Usuario: admin` sem nenhuma verificação
   contra o JWT, corrompendo a trilha de autoria da importação.
-- **A4 — `PropostasPage.tsx` sem paginação nenhuma.** `GET /propostas/` é
-  chamado sem `skip`/`limit`; com 2.252 propostas já no banco hoje, a tela
-  carrega e renderiza tudo de uma vez numa `<table>` sem virtualização —
-  risco real de travar a aba do navegador conforme a base cresce. Contraste:
-  a Mesa de Crédito (`/dashboard`) pagina corretamente.
-- **A5 — FKs centrais sem índice**: `Proposta.corretor_id`,
+- **A4 — ✅ CORRIGIDO** — `PropostasPage.tsx` sem paginação nenhuma.
+  `GET /propostas/` era chamado sem `skip`/`limit` explícitos e o
+  cabeçalho mostrava `propostas.length` (travado em 50, o default do
+  backend) como se fosse o total real — enganoso com milhares de
+  propostas no banco. Endpoint passou a retornar
+  `{items, total, skip, limit}` (`PropostasListaResponse`, mesmo padrão
+  da Mesa de Crédito) e o frontend ganhou paginação Anterior/Próxima com
+  o total real.
+- **A5 — ✅ CORRIGIDO** — FKs centrais sem índice: `Proposta.corretor_id`,
   `Corretor.grupo_id`, `Pendencia.responsavel_id` — todas usadas em
-  `filter`/`join` em produção, nenhuma indexada. Contraste:
-  `CorretorEsteira` (tabela mais nova) tem `index=True` nas duas FKs —
-  o padrão é conhecido no projeto, só não foi aplicado retroativamente.
+  `filter`/`join` em produção, nenhuma indexada. Adicionado `index=True`
+  nos três em `models.py` e aplicado `CREATE INDEX IF NOT EXISTS` no
+  banco de desenvolvimento real (`migrate_indices_fks_a5.sql` — rodar
+  também em produção).
 - **A6 — Importação manual de CSV pode setar `corretor_id` sem confiança.**
   `routers/importacoes.py:21,70-78,97` aceita mapear uma coluna do CSV
   direto para `Proposta.corretor_id`, ignorando completamente
@@ -237,11 +240,13 @@ sem alerta a ninguém.
   `Proposta.valor`, `GrupoCorretor.limite_valor`,
   `Corretor.limite_valor_diario` — todos `Float` (IEEE-754) em sistema
   financeiro, sem nenhuma constraint impedindo valor negativo.
-- **A8 — Badge de status com cores invertidas entre telas.**
-  `PropostasPage.tsx` mostra `BLOQUEADA` em laranja/`ERRO` em vermelho;
-  `DashboardPropostasTable.tsx`/`PropostaDetalheModal.tsx` mostram o
-  oposto — a mesma proposta bloqueada aparece com cores diferentes
-  dependendo de qual tela o analista está olhando.
+- **A8 — ✅ CORRIGIDO** — Badge de status com cores invertidas entre
+  telas. `PropostasPage.tsx` tinha sua própria paleta divergente da usada
+  em `DashboardPropostasTable.tsx`/`PropostaDetalheModal.tsx` (que já
+  eram idênticas entre si) — a mesma proposta bloqueada aparecia com
+  cores diferentes dependendo de qual tela o analista estava olhando.
+  Extraído `STATUS_META`/`StatusBadge` para `frontend/src/lib/
+  statusBadge.tsx`, único agora nos três lugares.
 - **A9 — ✅ CORRIGIDO** — Celery Beat estava configurado, mas sem serviço
   `beat` no docker-compose. `celery_app.py:46-52` define
   `varredura-propostas-pendentes` a cada 5 minutos (resgata propostas
@@ -255,11 +260,11 @@ sem alerta a ninguém.
   consumir a fila, que este ambiente não tem rodando. A task Celery
   original (`workers/tasks.py::varredura_pendentes`) foi mantida
   inalterada, para quando houver `celery beat` + worker reais em produção.
-- **A10 — `UsuariosPage.tsx`: mapa de cor de perfil errado ativo por
-  shadowing.** Existem duas constantes `BADGE_PERFIL` no mesmo arquivo —
-  uma local (com "supervisor", que não existe no enum do backend, e sem
-  "operador") faz sombra sobre a versão correta declarada no fim do
-  arquivo. Usuários com perfil `operador` perdem a cor distintiva.
+- **A10 — ✅ CORRIGIDO** — `UsuariosPage.tsx`: mapa de cor de perfil
+  errado ativo por shadowing. Existiam duas constantes `BADGE_PERFIL` no
+  mesmo arquivo — uma local (com "supervisor", que não existe no enum do
+  backend, e sem "operador") fazia sombra sobre a versão correta
+  declarada no fim do arquivo. Removida a constante local errada.
 
 ---
 
@@ -293,8 +298,9 @@ sem alerta a ninguém.
   generalizar num contrato comum a todos os bancos. `BankAdapter`
   continua valendo para `health_check`/`get_produtos`/`get_referencia`,
   que são realmente usados por `routers/bancos.py`.
-- **M6** — `schemas_importacao.py` (177 linhas) é código morto — zero
-  importadores em todo o backend.
+- **M6 — ✅ CORRIGIDO** — `schemas_importacao.py` (177 linhas) era código
+  morto — zero importadores em todo o backend, confirmado antes de
+  remover. Arquivo excluído.
 - **M7** — CORS com `allow_origins=["*"]` + `allow_credentials=True`
   (`main.py:35-41`) — combinação não recomendada, já listada como dívida
   técnica no próprio ONBOARDING mas ainda não corrigida.
@@ -399,9 +405,49 @@ sem alerta a ninguém.
   direta contra o banco real sem exceção (0 propostas travadas no
   momento do teste). Ver detalhe completo na seção 2, ALTO A9.
 
-O restante da lista (seção 4) continua aguardando priorização — auditoria
-primeiro, relatório mostrado, correções aplicadas uma de cada vez conforme
-você for pedindo.
+- **A4 — `PropostasPage.tsx` sem paginação real.** Backend passou a
+  retornar `{items, total, skip, limit}` (`PropostasListaResponse`) em
+  `GET /propostas/`, com `total = q.count()` antes do `offset`/`limit`.
+  Frontend ganhou paginação Anterior/Próxima e o cabeçalho passou a
+  mostrar o total real em vez de `propostas.length` (que ficava travado
+  em 50). Validado por leitura estática (import fresco do Python +
+  compilação limpa do Vite) — não confirmado via HTTP ao vivo por causa
+  do problema de porta fantasma já registrado em memória; usuário
+  optou por não bloquear o avanço aguardando validação manual.
+
+- **A2 — `_auto_mapear_convenio` sem tratamento de corrida.** Envolvido
+  em `self._db.begin_nested()` (SAVEPOINT) + `try/except IntegrityError`
+  — corrida entre propostas concorrentes com convênio novo idêntico não
+  sobe mais exceção até o motor, evitando a proposta presa em
+  `EM_ANALISE`. Validado: `import app.main` limpo.
+
+- **A5 — Índices em FKs sem índice.** Adicionado `index=True` em
+  `Proposta.corretor_id`, `Corretor.grupo_id`, `Pendencia.responsavel_id`
+  (`models.py`) e criado `backend/migrate_indices_fks_a5.sql`. Aplicado
+  diretamente no banco de desenvolvimento (`CREATE INDEX IF NOT EXISTS`)
+  — confirmado via `pg_indexes` que os 3 índices existem agora.
+  **Rodar o mesmo script em produção.**
+
+- **A8 — Cores de status divergentes entre telas.** Extraído
+  `STATUS_META`/`StatusBadge` (únicos) para
+  `frontend/src/lib/statusBadge.tsx`; `PropostasPage.tsx`,
+  `DashboardPropostasTable.tsx` e `PropostaDetalheModal.tsx` agora
+  importam da mesma fonte — elimina tanto a divergência de cores quanto
+  a duplicação de código (também citada na seção BAIXO).
+
+- **A10 — Badge de perfil errado por shadowing.** Removida a constante
+  `BADGE_PERFIL` local (duplicada e incorreta) em `UsuariosPage.tsx`;
+  só resta a versão correta no fim do arquivo, com `operador` incluído.
+
+- **M6 — `schemas_importacao.py` código morto.** Confirmado zero
+  importadores em todo o backend antes de remover; arquivo excluído.
+
+- **Blacklist.ativo (fragmento do C1).** Verificado que o filtro
+  `Blacklist.ativo == True` já estava presente em `antifraude.py:206` —
+  item já resolvido, a tabela da seção 4.1 só não tinha sido atualizada.
+
+O restante da lista (seção 4) continua aguardando priorização — itens que
+precisam de decisão de negócio/produto ficam na seção 4.2.
 
 ---
 
@@ -412,24 +458,20 @@ você for pedindo.
 | # | Correção | Risco de aplicar |
 |---|---|---|
 | C1 | ✅ **FEITO** — código corrigido + `migrate_blacklist_schema.sql` aplicada (tabela real estava com schema antigo, sem `tipo`/`valor`) | Aplicado e validado com CPF fictício via simulador. **Mudança de comportamento observável**: propostas com CPF na blacklist agora bloqueiam/pontuam de verdade — avise o time antes de replicar em outros ambientes. |
-| C3 | Inverter o fallback de status: só `BLOQUEADO` explícito vira `BLOQUEADA`; qualquer outro valor (inclusive um `APROVADO` inesperado) cai em `ANALISE_MANUAL` — nos dois arquivos (C2) | Nenhum — reforça a garantia já documentada, não muda comportamento hoje (o `else` é código morto atualmente) |
-| A2 | Envolver `_auto_mapear_convenio` em `try/except IntegrityError` com rollback do savepoint | Nenhum — só evita a proposta ficar presa |
-| A5 | Adicionar índice às 3 FKs sem índice | Nenhum — migration aditiva, sem downtime relevante |
-| A10 | Remover a constante `BADGE_PERFIL` duplicada/errada em `UsuariosPage.tsx` | Nenhum — puramente visual |
-| M6 | Remover `schemas_importacao.py` | Nenhum — zero importadores confirmados |
-| A8 | Unificar `StatusBadge`/cores num único componente compartilhado | Nenhum — visual, elimina divergência |
-| — | Adicionar `Blacklist.ativo == True` ao filtro (parte do C1) | Nenhum |
+| C3 | ✅ **FEITO** — já corrigido em sessão anterior (ver PROBLEMAS_PENDENTES.txt) | — |
+| A2 | ✅ **FEITO** — `_auto_mapear_convenio` envolvido em SAVEPOINT + `try/except IntegrityError` | Aplicado. Sem mudança de comportamento hoje — só evita que a proposta fique presa numa corrida rara. |
+| A5 | ✅ **FEITO** — índices adicionados às 3 FKs (`models.py` + `migrate_indices_fks_a5.sql` aplicada no banco de dev) | Aplicado. Rodar `migrate_indices_fks_a5.sql` em produção também. |
+| A10 | ✅ **FEITO** — removida a constante `BADGE_PERFIL` duplicada/errada em `UsuariosPage.tsx` | Aplicado — puramente visual. |
+| M6 | ✅ **FEITO** — `schemas_importacao.py` removido | Aplicado — zero importadores confirmados antes de remover. |
+| A8 | ✅ **FEITO** — `StatusBadge`/cores unificados em `frontend/src/lib/statusBadge.tsx` | Aplicado — visual, elimina divergência entre telas. |
+| — | Adicionar `Blacklist.ativo == True` ao filtro (parte do C1) | Já estava aplicado no código (`antifraude.py:206`) — item já resolvido, só não tinha sido marcado nesta tabela. |
 
 ### 4.2 Precisam de decisão de negócio/produto antes de corrigir
 
 | # | Motivo para não corrigir sozinho |
 |---|---|
-| C2 | Decidir formalmente: o sistema roda em modo síncrono (dev) ou Celery em produção? Se Celery, `workers/tasks.py` precisa ganhar `resolver_corretor`/`avaliar_shadow` — é lógica de negócio nova num arquivo diferente, prefiro seu aval antes de duplicar/unificar. |
-| C4 | Adicionar `Depends(verificar_token)` em ~10 routers é simples tecnicamente, mas pode quebrar integrações hoje "funcionando sem token" (ex. scripts internos, Postman salvo) — quero confirmar com você antes de sair travando endpoint por endpoint. |
-| C5 | Adicionar checagem de perfil em aprovar/bloquear/reprocessar — afeta diretamente quem pode aprovar crédito hoje; risco de bloquear um fluxo operacional real se algum OPERADOR depende disso hoje. |
-| C6/C7 | Corrigir Dockerfile/secrets é seguro em si, mas exige acesso/decisão sobre como o deploy real vai gerenciar segredos (Vault? variável de CI/CD?) — não é só código. |
-| C8 | Mover `_seed_admin` para só rodar em startup (não a cada login) é simples, mas quero confirmar que não há dependência operacional nesse comportamento hoje. |
-| A4 | Adicionar paginação real em `PropostasPage` muda a UX da tela mais usada do sistema — prefiro alinhar layout/comportamento com você antes. |
+| C2, C4, C5, C6/C7, C8 | ✅ **FEITOS** em sessão anterior a esta (ver `PROBLEMAS_PENDENTES.txt`) — tabela mantida só por rastreabilidade histórica. |
+| A4 | ✅ **FEITO** — ver seção 3 (paginação real implementada e o usuário optou por não bloquear aguardando validação manual). |
 | M4 | Adicionar auditoria em ~8 routers é mecânico, mas é volume grande de mudança — posso fazer em lote se você aprovar. |
 
 ---

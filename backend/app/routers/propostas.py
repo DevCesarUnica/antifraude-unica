@@ -20,7 +20,7 @@ from app.database import get_db
 from app.models import Proposta, StatusProposta, TipoEvento, Usuario
 from app.schemas import (
     PropostaCreate, PropostaOut, PropostaSummary, PropostasDashboardResponse,
-    AuditoriaOut, Mensagem,
+    PropostasListaResponse, AuditoriaOut, Mensagem,
 )
 from app.services.auditoria import AuditoriaService, log_auditoria
 from app.services.propostas_dashboard import query_dashboard
@@ -92,7 +92,7 @@ def criar_proposta(body: PropostaCreate, request: Request, db: Session = Depends
 
 # ── Listagem e filtros ────────────────────────────────────────────────────────
 
-@router.get("/", response_model=list[PropostaOut])
+@router.get("/", response_model=PropostasListaResponse)
 def listar_propostas(
     status: str | None = None,
     banco: str | None = None,
@@ -112,7 +112,9 @@ def listar_propostas(
         q = q.filter(Proposta.cpf_cliente.ilike(f"%{digits}%"))
     if nome:
         q = q.filter(Proposta.nome_cliente.ilike(f"%{nome}%"))
-    return q.order_by(Proposta.criado_em.desc()).offset(skip).limit(limit).all()
+    total = q.count()
+    items = q.order_by(Proposta.criado_em.desc()).offset(skip).limit(limit).all()
+    return {"items": items, "total": total, "skip": skip, "limit": limit}
 
 
 @router.get("/summary", response_model=PropostaSummary)

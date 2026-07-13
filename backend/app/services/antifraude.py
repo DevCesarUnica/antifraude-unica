@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -155,15 +156,26 @@ class MotorAntifraude:
         existente = self._db.query(Convenio).filter(
             Convenio.nome == proposta.convenio
         ).first()
-        if not existente:
-            novo = Convenio(
-                nome=proposta.convenio,
-                banco=proposta.banco,
-                ativo=True,
-                auto_registrado=True,
-            )
-            self._db.add(novo)
-            self._db.flush()
+        if existente:
+            return
+        try:
+            with self._db.begin_nested():
+                novo = Convenio(
+                    nome=proposta.convenio,
+                    banco=proposta.banco,
+                    ativo=True,
+                    auto_registrado=True,
+                )
+                self._db.add(novo)
+                self._db.flush()
+        except IntegrityError:
+            # Corrida: outra proposta concorrente (dois workers, ou duas
+            # syncs simultâneas) já criou este convênio entre o SELECT e o
+            # INSERT (UNIQUE(nome)). O savepoint acima é revertido
+            # automaticamente pelo `with`; o convênio já existe, nada a
+            # fazer — sem isso, o IntegrityError subia até o motor e
+            # deixava a proposta presa em EM_ANALISE (AUDITORIA_PRODUCAO.md, A2).
+            log.warning("antifraude.convenio_corrida", convenio=proposta.convenio)
 
     # ── Avaliação individual por tipo ─────────────────────────────────────────
 

@@ -113,7 +113,7 @@ class Corretor(Base):
     email: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     telefone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     codigo_externo: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
-    grupo_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("grupos_corretores.id"), nullable=True)
+    grupo_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("grupos_corretores.id"), nullable=True, index=True)
     limite_valor_diario: Mapped[float] = mapped_column(Float, default=0.0)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     metadados: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -193,7 +193,7 @@ class Proposta(Base):
     # Chave de idempotência — nunca duplicar envio ao banco
     proposta_id_externo: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
 
-    corretor_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("corretores.id"), nullable=True)
+    corretor_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("corretores.id"), nullable=True, index=True)
     cpf_cliente: Mapped[str] = mapped_column(String(14), nullable=False)
     nome_cliente: Mapped[str | None] = mapped_column(String(200), nullable=True)
     uf_cliente: Mapped[str | None] = mapped_column(String(2), nullable=True)
@@ -512,7 +512,7 @@ class Pendencia(Base):
     proposta_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("propostas.id"), nullable=True, index=True)
     tipo: Mapped[str] = mapped_column(Enum(TipoPendencia, name="tipo_pendencia"), nullable=False)
     descricao: Mapped[str] = mapped_column(Text, nullable=False)
-    responsavel_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("usuarios.id"), nullable=True)
+    responsavel_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("usuarios.id"), nullable=True, index=True)
     prazo: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolvida: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     resolucao: Mapped[str | None] = mapped_column(Text, nullable=True)

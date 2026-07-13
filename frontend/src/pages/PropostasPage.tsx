@@ -2,6 +2,7 @@ import { useState, Component, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getPropostas, aprovarProposta, bloquearProposta, reprocessarProposta } from "@/lib/api";
 import Layout from "@/components/Layout";
+import { StatusBadge } from "@/lib/statusBadge";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -25,21 +26,10 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
-const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
-  ENFILEIRADA:      { bg: "rgba(148,163,184,0.15)", color: "#94a3b8" },
-  EM_ANALISE:       { bg: "rgba(96,165,250,0.15)",  color: "#60a5fa" },
-  APROVADA:         { bg: "rgba(52,211,153,0.15)",  color: "#34d399" },
-  REPROVADA:        { bg: "rgba(248,113,113,0.15)", color: "#f87171" },
-  BLOQUEADA:        { bg: "rgba(251,146,60,0.15)",  color: "#fb923c" },
-  ANALISE_MANUAL:   { bg: "rgba(251,191,36,0.15)",  color: "#fbbf24" },
-  ENVIADA_BANCO:    { bg: "rgba(129,140,248,0.15)", color: "#818cf8" },
-  CONFIRMADA_BANCO: { bg: "rgba(16,185,129,0.15)",  color: "#10b981" },
-  ERRO:             { bg: "rgba(239,68,68,0.15)",   color: "#ef4444" },
-};
-
 const STATUSES = ["", "ENFILEIRADA", "EM_ANALISE", "APROVADA", "BLOQUEADA", "ANALISE_MANUAL", "ERRO"];
 
 const FILTROS_VAZIOS = { status: "", banco: "", cpf: "", nome: "" };
+const LIMIT = 50;
 
 const inputCls: React.CSSProperties = {
   backgroundColor: "var(--bg-mid)", color: "var(--text-primary)",
@@ -75,30 +65,39 @@ function fmtData(v: unknown): string {
 export default function PropostasPage() {
   const [filtros, setFiltros] = useState(FILTROS_VAZIOS);
   const [aplicados, setAplicados] = useState(FILTROS_VAZIOS);
+  const [skip, setSkip] = useState(0);
   const qc = useQueryClient();
 
   const temFiltro = Object.values(aplicados).some(Boolean);
 
-  const { data: propostas = [], isLoading, isError, error } = useQuery({
-    queryKey: ["propostas", aplicados],
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ["propostas", aplicados, skip],
     queryFn: () => getPropostas({
       status: aplicados.status || undefined,
       banco:  aplicados.banco  || undefined,
       cpf:    aplicados.cpf    || undefined,
       nome:   aplicados.nome   || undefined,
+      skip,
+      limit: LIMIT,
     }),
     refetchInterval: 8_000,
   });
+
+  const propostas   = data?.items ?? [];
+  const total       = data?.total ?? 0;
+  const paginaAtual  = Math.floor(skip / LIMIT) + 1;
+  const totalPaginas = Math.max(1, Math.ceil(total / LIMIT));
 
   const mutAprovar     = useMutation({ mutationFn: aprovarProposta,     onSuccess: () => qc.invalidateQueries({ queryKey: ["propostas"] }) });
   const mutBloquear    = useMutation({ mutationFn: bloquearProposta,    onSuccess: () => qc.invalidateQueries({ queryKey: ["propostas"] }) });
   const mutReprocessar = useMutation({ mutationFn: reprocessarProposta, onSuccess: () => qc.invalidateQueries({ queryKey: ["propostas"] }) });
 
-  const aplicarFiltros = () => setAplicados({ ...filtros });
+  const aplicarFiltros = () => { setAplicados({ ...filtros }); setSkip(0); };
 
   const limparFiltros = () => {
     setFiltros(FILTROS_VAZIOS);
     setAplicados(FILTROS_VAZIOS);
+    setSkip(0);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -114,7 +113,7 @@ export default function PropostasPage() {
           <div>
             <h1 className="text-lg font-black uppercase tracking-wide" style={{ color: "var(--text-primary)" }}>Propostas</h1>
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              {Array.isArray(propostas) ? propostas.length : 0} registro{Array.isArray(propostas) && propostas.length !== 1 ? "s" : ""}
+              {total.toLocaleString("pt-BR")} registro{total !== 1 ? "s" : ""}
               {temFiltro ? " (filtrado)" : ""}
             </p>
           </div>
@@ -178,14 +177,13 @@ export default function PropostasPage() {
                   {isLoading && (
                     <tr><td colSpan={9} className="text-center py-10 text-sm" style={{ color: "var(--text-muted)" }}>Carregando...</td></tr>
                   )}
-                  {!isLoading && !isError && Array.isArray(propostas) && propostas.length === 0 && (
+                  {!isLoading && !isError && propostas.length === 0 && (
                     <tr><td colSpan={9} className="text-center py-10 text-sm" style={{ color: "var(--text-muted)" }}>
                       {temFiltro ? "Nenhuma proposta encontrada para os filtros aplicados." : "Nenhuma proposta encontrada."}
                     </td></tr>
                   )}
-                  {Array.isArray(propostas) && propostas.map((p: any, idx: number) => {
+                  {propostas.map((p: any, idx: number) => {
                     const statusStr = safe(p.status);
-                    const badge = STATUS_BADGE[statusStr] ?? STATUS_BADGE.ENFILEIRADA;
                     const score = typeof p.score_fraude === "number" ? p.score_fraude : null;
                     return (
                       <tr key={safe(p.id) || idx} style={{ backgroundColor: idx % 2 === 0 ? "var(--bg-row-even)" : "var(--bg-row-odd)", borderBottom: "1px solid var(--border-mid)" }}>
@@ -197,8 +195,7 @@ export default function PropostasPage() {
                         <td className="px-4 py-3 text-xs font-medium" style={{ color: "var(--text-primary)" }}>{safe(p.banco)}</td>
                         <td className="px-4 py-3 text-right text-xs font-medium" style={{ color: "var(--text-primary)" }}>{fmtValor(p.valor)}</td>
                         <td className="px-4 py-3 text-right">
-                          <span className="text-xs px-2 py-0.5 rounded font-semibold uppercase tracking-wide"
-                            style={{ backgroundColor: badge.bg, color: badge.color }}>{statusStr}</span>
+                          <StatusBadge status={statusStr} />
                         </td>
                         <td className="px-4 py-3 text-right">
                           {score != null ? (
@@ -228,6 +225,27 @@ export default function PropostasPage() {
               </table>
             </div>
           </div>
+
+          {/* Paginação */}
+          {total > LIMIT && (
+            <div className="flex items-center justify-end gap-2 px-1">
+              <button
+                disabled={skip === 0 || isLoading}
+                onClick={() => setSkip(Math.max(0, skip - LIMIT))}
+                className="px-3 py-1 rounded-lg text-xs font-semibold"
+                style={{ backgroundColor: "var(--bg-mid)", color: skip === 0 ? "var(--text-muted)" : "var(--text-primary)", opacity: skip === 0 ? 0.5 : 1 }}
+              >‹ Anterior</button>
+              <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)" }}>
+                {paginaAtual} / {totalPaginas}
+              </span>
+              <button
+                disabled={paginaAtual >= totalPaginas || isLoading}
+                onClick={() => setSkip(skip + LIMIT)}
+                className="px-3 py-1 rounded-lg text-xs font-semibold"
+                style={{ backgroundColor: "var(--bg-mid)", color: paginaAtual >= totalPaginas ? "var(--text-muted)" : "var(--text-primary)", opacity: paginaAtual >= totalPaginas ? 0.5 : 1 }}
+              >Próxima ›</button>
+            </div>
+          )}
         </ErrorBoundary>
       </div>
     </Layout>

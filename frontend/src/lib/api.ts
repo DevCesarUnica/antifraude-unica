@@ -26,7 +26,9 @@ api.interceptors.response.use(
 
 // ── Propostas ─────────────────────────────────────────────────────────────────
 
-export const getPropostas = (params?: { status?: string; banco?: string; cpf?: string; nome?: string }) =>
+export const getPropostas = (params?: {
+  status?: string; banco?: string; cpf?: string; nome?: string; skip?: number; limit?: number;
+}) =>
   api.get("/propostas/", { params }).then((r) => r.data);
 
 export const getPropostaSummary = () =>

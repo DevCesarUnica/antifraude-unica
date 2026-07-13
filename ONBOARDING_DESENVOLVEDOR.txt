@@ -677,16 +677,24 @@ graves ou compromete a integridade financeira das operações.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  REGRA 1: banco="HOPE" é HARDCODADO APENAS EM DOIS LUGARES
+  REGRA 1: banco="HOPE" é HARDCODADO EM TRÊS LUGARES CONHECIDOS
 
-    Backend  → services/hope_adapter.py   (correto)
-    Frontend → src/lib/hopeAdapter.ts     (correto)
+    Backend  → services/hope_adapter.py           (correto)
+    Backend  → routers/buscar.py::_normalizar_hope (correto — função
+                exclusiva de normalizar resultado de busca vindo da
+                Titan, mesmo raciocínio do hope_adapter.py)
+    Frontend → src/lib/hopeAdapter.ts             (correto)
 
     Em QUALQUER outro arquivo, banco="HOPE" é um BUG.
 
     Por quê: Titan = sistema exclusivo do banco Hope. Só faz sentido
-    hardcodar lá. Na Storm, "HOPE" nunca deve aparecer pois Storm é um
-    hub de outros bancos.
+    hardcodar nesses três lugares, todos especificamente sobre dados
+    vindos da Titan. Na Storm, "HOPE" nunca deve aparecer pois Storm é
+    um hub de outros bancos.
+
+    (AUDITORIA_PRODUCAO.md, achado M3: essa regra dizia "só dois
+    lugares" e não citava buscar.py — código estava certo, só a
+    documentação estava incompleta.)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

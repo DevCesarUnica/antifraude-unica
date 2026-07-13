@@ -974,7 +974,7 @@ export default function RegrasPage() {
                           <td className="px-4 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>{r.peso_score}</td>
                           <td className="px-4 py-3"><BloqueanteBadge bloqueante={r.bloqueante} /></td>
                           <td className="px-4 py-3"><StatusBadge ativo={r.ativo} /></td>
-                          <td className="px-4 py-3"><ShadowBadge shadow={r.shadow_mode} /></td>
+                          <td className="px-4 py-3"><ShadowBadge shadow={r.shadow_mode || r.tipo === "LIMITE_CORRETOR_SHADOW"} /></td>
                           <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{fmtDataCurta(r.criado_em)}</td>
                           <td className="px-4 py-3 text-[11px] whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{fmtDataCurta(r.atualizado_em)}</td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">

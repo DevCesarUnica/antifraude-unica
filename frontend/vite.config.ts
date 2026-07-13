@@ -11,27 +11,12 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    proxy: {
-      "/auth": "http://localhost:8000",
-      "/usuarios": "http://localhost:8000",
-      "/propostas": "http://localhost:8000",
-      "/regras": "http://localhost:8000",
-      "/titan": "http://localhost:8000",
-      "/bancos": "http://localhost:8000",
-      "/storm": "http://localhost:8000",
-      "/convenios": "http://localhost:8000",
-      "/corretores": "http://localhost:8000",
-      "/grupos": "http://localhost:8000",
-      "/layouts": "http://localhost:8000",
-      "/importacoes": "http://localhost:8000",
-      "/averbacoes": "http://localhost:8000",
-      "/retornos-banco": "http://localhost:8000",
-      "/pendencias": "http://localhost:8000",
-      "/logs": "http://localhost:8000",
-      "/relatorios": "http://localhost:8000",
-      "/blacklist": "http://localhost:8000",
-      "/buscar": "http://localhost:8000",
-      "/health": "http://localhost:8000",
-    },
+    // Sem proxy: o frontend chama o backend direto via VITE_API_URL
+    // (frontend/src/lib/api.ts, baseURL absoluta), habilitado por CORS
+    // no backend (main.py). Um proxy por prefixo aqui colidia com as
+    // rotas do React Router de mesmo nome (ex: /propostas, /regras,
+    // /bancos...) — navegação direta por URL ou F5 nessas 12 telas
+    // acabava sendo interceptada pelo proxy e recebia JSON da API em
+    // vez do app React (AUDITORIA_PRODUCAO.md, achado M11).
   },
 });

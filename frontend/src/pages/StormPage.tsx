@@ -269,7 +269,6 @@ function stormStr(v: unknown): string | undefined {
  * NUNCA hardcodar "HOPE" para contratos Storm.
  */
 function getBancoProposta(raw: AnyData, origem: "storm" | "hope"): string {
-  console.log("[Origem proposta]:", origem);
   if (origem === "hope") return "HOPE";
 
   // Storm: extrai banco real da resposta — nunca assume "HOPE"
@@ -288,7 +287,6 @@ function getBancoProposta(raw: AnyData, origem: "storm" | "hope"): string {
   }
 
   const result = nome || "Não informado";
-  console.log("[Banco extraído]:", result);
   return result;
 }
 
@@ -345,7 +343,6 @@ function AbaAntifraude() {
     setLoading(true); setErro("");
     try {
       const data = await getStormAntifraude(esteira, pagina);
-      console.log("[Storm antifraude raw] primeiro item:", JSON.stringify(normalize(data, ["contratos", "items", "data", "content"])[0], null, 2));
       const items: AnyData[] = normalize(data, ["contratos", "items", "data", "content"]);
       const lista = items.map(normStormAntifraudeOp);
       setContratos(lista);
@@ -546,7 +543,6 @@ function AbaContratos() {
         data_fim: dataFim || undefined,
       });
       const raw = normalize(data, ["contratos", "items", "data"]);
-      console.log("[Storm /contratos raw] primeiro item:", JSON.stringify(raw[0], null, 2));
       setContratos(raw.map(normalizeContratoLista));
     } catch (e: AnyData) {
       setErro(e?.response?.data?.detail ?? "Erro ao buscar contratos");
@@ -557,7 +553,6 @@ function AbaContratos() {
     setFfHistorico(ffCode);
     try {
       const data = await getStormHistoricoContrato(ffCode);
-      console.log("[Storm histórico raw]:", JSON.stringify(data, null, 2));
       setHistorico(normalize(data, ["historico", "items", "data"]));
     } catch { setHistorico([]); }
   };
@@ -568,7 +563,6 @@ function AbaContratos() {
     setLoadingAcomp(true);
     try {
       const data = await getStormAcompanhamentoContrato(ffCode);
-      console.log("[Storm acompanhamento raw]:", JSON.stringify(data, null, 2));
       setAcompanhamento(data);
     } catch (e: AnyData) {
       console.error("[Storm acompanhamento erro]:", e?.response?.data ?? e);
@@ -697,13 +691,10 @@ function AbaClientes() {
   const [cliente, setCliente] = useState<ClienteNorm | null>(null);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
-  const [debugCliente, setDebugCliente] = useState<AnyData>(null);
-  const [debugContratos, setDebugContratos] = useState<AnyData>(null);
-  const [showDebug, setShowDebug] = useState(false);
 
   const buscar = async () => {
     if (!valor.trim()) return;
-    setLoading(true); setErro(""); setCliente(null); setDebugCliente(null); setDebugContratos(null);
+    setLoading(true); setErro(""); setCliente(null);
     try {
       const digits = valor.replace(/\D/g, "");
       // CPF formatado para endpoints que exigem XXX.XXX.XXX-XX
@@ -720,9 +711,6 @@ function AbaClientes() {
         const clienteData = rawCliente.status === "fulfilled" ? rawCliente.value : null;
         const contratosData = rawContratos.status === "fulfilled" ? rawContratos.value : null;
 
-        setDebugCliente(clienteData);
-        setDebugContratos(contratosData);
-
         const erroMsg = stormErro(clienteData);
         if (erroMsg && !contratosData) { setErro(erroMsg); return; }
 
@@ -731,7 +719,6 @@ function AbaClientes() {
         setCliente(norm);
       } else {
         const raw = await getStormClienteTelefone(digits);
-        setDebugCliente(raw);
         const erroMsg = stormErro(raw);
         if (erroMsg) { setErro(erroMsg); return; }
         const norm = mergeClienteAndContratos(raw, null);
@@ -802,38 +789,6 @@ function AbaClientes() {
 
       {loading && <Spinner />}
       {erro && <AlertErro msg={erro} />}
-
-      {/* ── Painel de diagnóstico — remover após confirmar estrutura ── */}
-      {(debugCliente || debugContratos) && (
-        <div className="rounded-xl overflow-hidden text-xs" style={{ border: "1px solid rgba(234,179,8,0.4)", backgroundColor: "rgba(234,179,8,0.05)" }}>
-          <button
-            onClick={() => setShowDebug((v) => !v)}
-            className="w-full px-4 py-2.5 text-left font-black uppercase tracking-widest flex justify-between"
-            style={{ color: "#eab308" }}
-          >
-            <span>🔍 Diagnóstico API Storm</span>
-            <span>{showDebug ? "▲ ocultar" : "▼ ver JSON bruto"}</span>
-          </button>
-          {showDebug && (
-            <div className="px-4 pb-4 space-y-3">
-              <div>
-                <p className="font-bold mb-1" style={{ color: "#eab308" }}>/clientes/cpf</p>
-                <pre className="text-[10px] overflow-auto max-h-48 p-2 rounded" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)" }}>
-                  {JSON.stringify(debugCliente, null, 2)}
-                </pre>
-              </div>
-              {debugContratos && (
-                <div>
-                  <p className="font-bold mb-1" style={{ color: "#eab308" }}>/contratos?cpf</p>
-                  <pre className="text-[10px] overflow-auto max-h-48 p-2 rounded" style={{ backgroundColor: "var(--bg-mid)", color: "var(--text-primary)" }}>
-                    {JSON.stringify(debugContratos, null, 2)}
-                  </pre>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
 
       {cliente && (
         <div className="space-y-3">
@@ -1054,11 +1009,9 @@ function AbaColaboradores() {
       let data: AnyData;
       if (subAtual === "parceiros") {
         data = await getStormParceiros({ pagina: paginaAtual, nome: buscaAtual || undefined });
-        console.log("[Storm parceiros raw]:", JSON.stringify(data, null, 2));
         setItems(normalize(data, ["parceiros", "corretores", "correspondentes", "promotoras", "items", "data"]));
       } else {
         data = await getStormColaboradores({ pagina: paginaAtual, usuario: buscaAtual || undefined });
-        console.log("[Storm colaboradores raw]:", JSON.stringify(data, null, 2));
         setItems(normalize(data, ["colaboradores", "operadores", "usuarios", "items", "data"]));
       }
     } catch (e: AnyData) {
@@ -1083,7 +1036,6 @@ function AbaColaboradores() {
       const data = norm.id != null
         ? (sub === "parceiros" ? await getStormParceiro(norm.id) : await getStormColaborador(norm.id))
         : c;
-      console.log(`[Storm detalhe ${sub} raw]:`, JSON.stringify(data, null, 2));
       setDetalhe(data ?? c);
     } catch {
       setDetalhe(c);

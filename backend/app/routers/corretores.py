@@ -380,6 +380,13 @@ def criar_corretor(body: CorretorCreate, db: Session = Depends(get_db)):
     return corretor
 
 
+@router.get("/importacoes/historico", response_model=list[ImportacaoOut])
+def historico_importacoes(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+    return db.query(ImportacaoCorretor).order_by(
+        ImportacaoCorretor.criado_em.desc()
+    ).offset(skip).limit(limit).all()
+
+
 @router.get("/{corretor_id}", response_model=CorretorOut)
 def obter_corretor(corretor_id: str, db: Session = Depends(get_db)):
     return _get_ou_404(db, corretor_id)
@@ -514,13 +521,6 @@ async def importar_corretores(
     db.commit()
     db.refresh(importacao)
     return importacao
-
-
-@router.get("/importacoes/historico", response_model=list[ImportacaoOut])
-def historico_importacoes(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
-    return db.query(ImportacaoCorretor).order_by(
-        ImportacaoCorretor.criado_em.desc()
-    ).offset(skip).limit(limit).all()
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────

@@ -297,10 +297,13 @@ sem alerta a ninguém.
 - **M2** — `Corretor.limite_valor_diario` é campo morto: `LIMITE_DIARIO`
   lê `params["limite_valor_diario"]` (global da regra), nunca o valor
   individual cadastrado no corretor.
-- **M3** — Hardcode de `"HOPE"` fora dos dois locais documentados como
-  únicos permitidos: `routers/buscar.py:70` também hardcoda `"banco":
-  "HOPE"` — inofensivo na prática, mas invalida a auditoria "grep por HOPE
-  deve achar só 2 lugares" descrita no ONBOARDING.
+- **M3 — ✅ CORRIGIDO (era a documentação, não o código)** — Hardcode de
+  `"HOPE"` fora dos dois locais documentados como únicos permitidos:
+  `routers/buscar.py:71` também hardcoda `"banco": "HOPE"`, mas dentro de
+  `_normalizar_hope()`, uma função exclusiva de normalizar resultado de
+  busca vindo da Titan — mesmo raciocínio do `hope_adapter.py`, código
+  correto. Só o `ONBOARDING_DESENVOLVEDOR.txt` ("REGRA 1: só dois
+  lugares") estava desatualizado; corrigido para citar os três.
 - **M4** — Endpoints mutantes sem nenhuma auditoria: `convenios.py`,
   `corretores.py` (CRUD + contatos + importação em massa),
   `grupos.py` (CRUD + vínculo, exceto `/importar-webdeck` que audita),
@@ -321,9 +324,11 @@ sem alerta a ninguém.
 - **M6 — ✅ CORRIGIDO** — `schemas_importacao.py` (177 linhas) era código
   morto — zero importadores em todo o backend, confirmado antes de
   remover. Arquivo excluído.
-- **M7** — CORS com `allow_origins=["*"]` + `allow_credentials=True`
-  (`main.py:35-41`) — combinação não recomendada, já listada como dívida
-  técnica no próprio ONBOARDING mas ainda não corrigida.
+- **M7 — ✅ CORRIGIDO** — CORS com `allow_origins=["*"]` +
+  `allow_credentials=True` (`main.py:35-41`) — combinação não
+  recomendada. Confirmado que o frontend nunca usa `withCredentials`
+  (auth é Bearer token no header, não cookie) — `allow_credentials` não
+  tinha função nenhuma. Trocado para `allow_credentials=False`.
 - **M8** — `AuditoriaLog` (`auditoria_logs`) vs. `LogAuditoria`
   (`logs_auditoria`) — nomes quase-anagramas em português para tabelas com
   propósitos diferentes (eventos de proposta vs. ações de usuário) — risco
@@ -334,27 +339,54 @@ sem alerta a ninguém.
   (`grupos.py::importar_esteiras_webdeck`) não usa nenhuma das duas.
 - **M10** — Sem Alembic real: schema evolui via `create_all()` + scripts
   `.sql` soltos, sem tracking de quais já rodaram em cada ambiente.
-- **M11** — 12 das 16 rotas autenticadas do frontend colidem com prefixos
-  do proxy do Vite — navegação direta por URL/F5 quebra em `/propostas`,
-  `/regras`, `/bancos`, `/usuarios`, `/storm`, `/corretores`, `/grupos`,
-  `/importacoes`, `/pendencias`, `/logs`, `/relatorios`, `/blacklist`.
-- **M12** — `StormPage.tsx` expõe um painel "Diagnóstico API Storm" com
-  JSON bruto de cliente (CPF, nome, telefone) direto na tela, mais vários
-  `console.log` de payloads completos espalhados pelo arquivo — parece
-  instrumentação de desenvolvimento esquecida.
-- **M13** — `BlacklistPage.tsx`: contadores por tipo (CPF/CNPJ/...)
-  calculados sobre a página atual (20 itens), não o total real — enganoso
-  com blacklist grande.
+- **M11 — ✅ CORRIGIDO** — 12 das 16 rotas autenticadas do frontend
+  colidiam com prefixos do proxy do Vite — navegação direta por URL/F5
+  quebrava em `/propostas`, `/regras`, `/bancos`, `/usuarios`, `/storm`,
+  `/corretores`, `/grupos`, `/importacoes`, `/pendencias`, `/logs`,
+  `/relatorios`, `/blacklist` (a requisição de navegação era interceptada
+  pelo proxy do Vite e recebia JSON da API em vez do HTML do app React).
+  Confirmado que o proxy era vestigial: `lib/api.ts` já usa `baseURL`
+  absoluta (`VITE_API_URL`/`localhost:8000` direto, habilitado por CORS),
+  nenhuma chamada relativa same-origin no frontend inteiro dependia dele.
+  Removido o bloco `server.proxy` de `vite.config.ts`.
+- **M12 — ✅ CORRIGIDO** — `StormPage.tsx` expunha um painel "Diagnóstico
+  API Storm" (o próprio comentário no código dizia "remover após
+  confirmar estrutura") com JSON bruto de cliente (CPF, nome, telefone)
+  direto na tela, mais 9 `console.log` de payloads completos (clientes,
+  contratos, parceiros, colaboradores) espalhados pelo arquivo — clara
+  instrumentação de desenvolvimento esquecida. Painel e state associado
+  (`debugCliente`/`debugContratos`/`showDebug`) removidos; os
+  `console.log` de payload removidos, mantidos só os `console.error` de
+  tratamento de erro real.
+- **M13 — ✅ já estava corrigido** (comentário no próprio código:
+  `routers/blacklist.py:94-96` já cita "bug corrigido: ver M13 da
+  auditoria" de uma sessão anterior a esta). `contagem_por_tipo` é
+  calculada com `GROUP BY` sobre a base inteira (`ativo=True`), não sobre
+  a página atual — confirmado correto, só a tabela desta auditoria não
+  tinha sido atualizada.
 - **M14** — `DashboardPropostasTable.tsx` não usa React Query; após uma
   ação (aprovar/bloquear) os KPIs do topo do dashboard só atualizam até
   10s depois (intervalo de refetch), sem invalidação imediata.
-- **M15** — `TipoRegra.LIMITE_CORRETOR_SHADOW` pode ser cadastrado pela
-  tela `/regras` sem nenhum aviso de que não tem avaliador — dá falsa
-  sensação de cobertura (a regra fica "ativa" na listagem, mas nunca
-  dispara).
-- **M16** — Rotas estáticas posicionadas de forma frágil (funcionam hoje só
-  por não haver colisão ainda): `corretores.py:323` (`/importacoes
-  /historico` depois de `/{corretor_id}`), padrão similar em `grupos.py`.
+- **M15 — melhorado** — `TipoRegra.LIMITE_CORRETOR_SHADOW` pode ser
+  cadastrado pela tela `/regras` sem nenhum aviso de que não tem
+  avaliador — dá falsa sensação de cobertura. Investigação mostrou que o
+  risco real é menor do que a descrição sugeria: o backend já tem
+  "defesa em profundidade" (`antifraude.py::_limite_corretor_shadow`
+  sempre força `score_contribuicao=0`/`bloqueante=False`, ignorando os
+  valores da regra — este tipo NUNCA pode bloquear/pontuar, mesmo se
+  alguém editar a regra na tela) e o formulário de criação já mostra um
+  aviso claro sobre "Modo Observação". O gap real era só visual na
+  listagem: uma regra criada manualmente com `shadow_mode=False` (default
+  do campo) não mostrava o badge "Observação". Corrigido forçando o badge
+  para este tipo independente do campo `shadow_mode` no banco.
+- **M16 — corrigido o caso citado** — Rotas estáticas posicionadas de
+  forma frágil: `corretores.py` tinha `GET /importacoes/historico`
+  definida DEPOIS de `GET /{corretor_id}`. Na prática não colidia hoje
+  (segmentos e métodos diferentes o suficiente), mas é o tipo de
+  ordenação que quebra silenciosamente com mudanças futuras — movida
+  para antes das rotas dinâmicas, seguindo a boa prática já usada em
+  `grupos.py` (`/esteiras` antes de `/{grupo_id}`). Não encontrei outra
+  instância real de colisão em `grupos.py` além dessa já correta.
 
 ---
 
@@ -484,6 +516,35 @@ sem alerta a ninguém.
   esbarra em endpoints sem autenticação nenhuma (não é só trocar a fonte
   do `criado_por`), e A6 exige mudar o comportamento de importações CSV
   que hoje funcionam. Movidos para a seção 4.2 (precisam da sua decisão).
+
+- **M7 — CORS.** `allow_credentials` trocado para `False` — confirmado
+  que o frontend nunca usa `withCredentials`, então não tinha função.
+
+- **M3 e M13 — já estavam corrigidos.** M3 era a documentação
+  (ONBOARDING) desatualizada, não o código. M13 já tinha sido corrigido
+  numa sessão anterior a esta (o próprio código já citava o achado).
+  Ambos só precisavam ser marcados nesta auditoria.
+
+- **M11 — Vite proxy colidindo com rotas do React Router.** Removido o
+  bloco `server.proxy` de `vite.config.ts`, confirmado vestigial (o
+  frontend já chama o backend direto via `baseURL` absoluta + CORS).
+  Validado: `curl http://localhost:3000/propostas` passou a retornar o
+  HTML do app em vez de JSON da API.
+
+- **M12 — Painel de diagnóstico e `console.log` de PII em `StormPage.tsx`.**
+  Removidos o painel "Diagnóstico API Storm" (JSON bruto de cliente na
+  tela) e 9 `console.log` de payloads completos; mantidos só os
+  `console.error` de tratamento de erro real.
+
+- **M15 — Aviso de regra sem efeito real.** Backend já tinha "defesa em
+  profundidade" (nunca bloqueia/pontua para este tipo, independente da
+  configuração). Corrigido o gap visual: badge "Observação" na listagem
+  agora aparece sempre para este tipo, independente do campo
+  `shadow_mode` no banco.
+
+- **M16 — Rota estática após rota dinâmica em `corretores.py`.** `GET
+  /importacoes/historico` movida para antes de `GET /{corretor_id}`,
+  seguindo o padrão já correto de `grupos.py`.
 
 O restante da lista (seção 4) continua aguardando priorização — itens que
 precisam de decisão de negócio/produto ficam na seção 4.2.

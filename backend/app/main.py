@@ -46,7 +46,13 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # allow_credentials=True combinado com allow_origins=["*"] é uma
+    # combinação não recomendada (AUDITORIA_PRODUCAO.md, M7): o frontend
+    # nunca envia cookies/credenciais (auth é Bearer token no header via
+    # localStorage — lib/api.ts não usa withCredentials), então
+    # allow_credentials não tem função aqui e só amplia a superfície de
+    # risco à toa.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

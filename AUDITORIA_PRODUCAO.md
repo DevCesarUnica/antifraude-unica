@@ -207,9 +207,11 @@ sem alerta a ninguém.
   concorrentes com convênio novo idêntico (dois workers Celery, ou duas
   syncs simultâneas) fazem a segunda estourar `IntegrityError` não tratado,
   que sobe até `_processar_sync` (também sem try/except ao redor do motor)
-  e deixa a proposta **presa em `EM_ANALISE`**. Sem recuperação automática
-  (o robô de varredura do Celery Beat não roda neste ambiente — ver C2/A9)
-  e sem recuperação manual (`/reprocessar` só aceita `ERRO`/`BLOQUEADA`).
+  e deixa a proposta **presa em `EM_ANALISE`**. Desde a correção do A9, o
+  robô de varredura (agora em `core/scheduler.py`) marca essa proposta
+  como `ERRO` após 10 min — visível e reprocessável manualmente via
+  `/reprocessar`, mas o `IntegrityError` em si continua sem tratamento
+  (a causa raiz deste A2 não foi corrigida, só deixou de ficar invisível).
 - **A3 — Header HTTP arbitrário usado como autoria.** `corretores.py:271`,
   `importacoes.py:59`: `criado_por=request.headers.get("x-usuario")` —
   qualquer chamador pode forjar `X-Usuario: admin` sem nenhuma verificação
@@ -240,12 +242,19 @@ sem alerta a ninguém.
   `DashboardPropostasTable.tsx`/`PropostaDetalheModal.tsx` mostram o
   oposto — a mesma proposta bloqueada aparece com cores diferentes
   dependendo de qual tela o analista está olhando.
-- **A9 — Celery Beat configurado, mas sem serviço `beat` no
-  docker-compose.** `celery_app.py:46-52` define
+- **A9 — ✅ CORRIGIDO** — Celery Beat estava configurado, mas sem serviço
+  `beat` no docker-compose. `celery_app.py:46-52` define
   `varredura-propostas-pendentes` a cada 5 minutos (resgata propostas
-  travadas). Sem um container `celery beat` rodando, essa tarefa nunca é
-  disparada — a "rede de segurança" documentada em `tasks.py` está inerte
-  no deploy atual.
+  travadas), mas sem um container `celery beat` rodando essa tarefa nunca
+  era disparada — a "rede de segurança" documentada em `tasks.py` ficava
+  inerte no deploy atual. Migrada a lógica de resgate para
+  `core/scheduler.py` (mesmo agendador interno criado para o sync da
+  Titan): roda a cada 5 min chamando `processar_proposta_core()` direto
+  (síncrono), em vez de `apply_async` — não dependia mais de Celery Beat,
+  mas também não dependia de um worker Celery/Redis disponível para
+  consumir a fila, que este ambiente não tem rodando. A task Celery
+  original (`workers/tasks.py::varredura_pendentes`) foi mantida
+  inalterada, para quando houver `celery beat` + worker reais em produção.
 - **A10 — `UsuariosPage.tsx`: mapa de cor de perfil errado ativo por
   shadowing.** Existem duas constantes `BADGE_PERFIL` no mesmo arquivo —
   uma local (com "supervisor", que não existe no enum do backend, e sem
@@ -376,6 +385,19 @@ sem alerta a ninguém.
   caminho diferente. Validado: backend reiniciado sem erro de import,
   `GET /bancos/` (que usa `HopeAdapter` de verdade) respondendo normal.
   Ver detalhe completo na seção 2, MÉDIO M5.
+
+- **A9 — Robô de varredura não disparava (Celery Beat sem serviço).**
+  Adicionado job `_varredura_propostas_pendentes()` em
+  `core/scheduler.py` (mesmo agendador interno do sync da Titan), rodando
+  a cada 5 min — reprocessa `ENFILEIRADA` presas > 5 min chamando
+  `processar_proposta_core()` direto (síncrono) e marca `EM_ANALISE`
+  presas > 10 min como `ERRO`, sem depender de Celery Beat nem de um
+  worker Celery/Redis consumindo fila (nenhum dos dois está rodando neste
+  ambiente). Task Celery original (`workers/tasks.py::varredura_pendentes`)
+  mantida inalterada para quando houver infraestrutura real. Validado:
+  backend reiniciado sem erro, job registrado no log, execução manual
+  direta contra o banco real sem exceção (0 propostas travadas no
+  momento do teste). Ver detalhe completo na seção 2, ALTO A9.
 
 O restante da lista (seção 4) continua aguardando priorização — auditoria
 primeiro, relatório mostrado, correções aplicadas uma de cada vez conforme

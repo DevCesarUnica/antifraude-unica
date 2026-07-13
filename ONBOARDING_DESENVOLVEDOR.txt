@@ -211,7 +211,9 @@ antifraude/
 │   │   ├── circuit_breaker.py → Proteção contra cascata de erros externos.
 │   │   └── scheduler.py  → Agendador interno (APScheduler). Sync automático
 │   │        com a Titan: ~10s após subir, a cada 2h, e à meia-noite.
-│   │        Não depende de Celery Beat/worker.
+│   │        Também roda a varredura de propostas travadas a cada 5 min
+│   │        (equivalente ao beat_schedule do Celery, que não roda de
+│   │        fato). Não depende de Celery Beat/worker.
 │   ├── routers/          → Um arquivo por recurso REST.
 │   │   ├── auth.py       → /auth/login, /auth/me
 │   │   ├── propostas.py  → /propostas/* (CRUD + dashboard + search)
@@ -947,16 +949,20 @@ PROBLEMA 8: CORS em desenvolvimento
     frontend vai para :3000 que proxia para :8000. CORS não é problema.
   Se adicionar novo router: adicionar prefixo ao proxy.
 
-PROBLEMA 9: Proposta travada em EM_ANALISE
+PROBLEMA 9: Proposta travada em EM_ANALISE — RESOLVIDO (ver AUDITORIA_
+  PRODUCAO.md, achado A9)
   Causa: motor travou (crash, timeout) antes de atualizar o status.
-  Solução no código (Celery Beat, 5 min): varredura() em workers/tasks.py
-    marcaria EM_ANALISE travadas há mais de 10 min como ERRO — mas essa
-    tarefa NÃO roda de fato em nenhum ambiente hoje (não existe serviço
-    `celery beat` no docker-compose nem em dev; diferente do sync da
-    Titan, que foi migrado para core/scheduler.py, esta tarefa continua
-    dependendo de um `celery beat` que nunca foi configurado).
-  Na prática (dev e prod atuais): usar POST /propostas/{id}/reprocessar
-    manualmente quando encontrar uma proposta travada.
+  Solução original no código (Celery Beat, 5 min): varredura() em
+    workers/tasks.py marcaria EM_ANALISE travadas há mais de 10 min como
+    ERRO — mas essa tarefa nunca rodava de fato (não existe serviço
+    `celery beat` no docker-compose nem em dev). Task mantida intacta
+    para quando houver infra real.
+  Solução ativa hoje: core/scheduler.py::_varredura_propostas_pendentes()
+    roda a mesma lógica a cada 5 min dentro do próprio processo do
+    backend, chamando processar_proposta_core() direto (síncrono) — não
+    depende de Celery Beat nem de worker/Redis disponível.
+  Ainda cabe reprocessamento manual via POST /propostas/{id}/reprocessar
+    quando quiser resolver na hora, sem esperar o próximo ciclo.
 
 
 ================================================================================

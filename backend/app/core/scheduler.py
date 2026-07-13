@@ -1,29 +1,30 @@
 """
 Agendador interno (APScheduler) — roda dentro do próprio processo FastAPI.
 
-Sincroniza operações do Titan sem depender de Celery Beat/worker externo
-(que hoje não roda como serviço separado neste projeto — ver
-AUDITORIA_PRODUCAO.md, achado A9).
+Reúne as tarefas periódicas do sistema sem depender de Celery Beat/worker
+externo (que hoje não roda como serviço separado neste projeto — ver
+AUDITORIA_PRODUCAO.md, achados A9): sync com a Titan e o robô de varredura
+que resgata propostas travadas.
 
 O backend deste projeto não fica no ar 24h (só roda enquanto alguém está
 trabalhando nele), então um cron fixo de meia-noite sozinho não seria
-suficiente — o processo estaria desligado nesse horário. Por isso:
+suficiente para o sync — o processo estaria desligado nesse horário. Por
+isso o sync roda assim que o processo sobe, se repete a cada 2h enquanto
+ativo, e também tem um cron de meia-noite para quando rodar 24h num
+servidor.
 
-  1. Roda uma vez assim que o processo sobe (cobre o caso comum: ligar o
-     backend de manhã e já trazer o que entrou desde a última sessão).
-  2. Repete a cada 2h enquanto o processo estiver ativo (cobre novas
-     operações que chegam ao longo do dia de trabalho).
-  3. Mantém também o agendamento diário à meia-noite, para quando este
-     backend rodar num servidor sempre ligado (produção).
-
-A sincronização em si é idempotente (app/services/titan_sync.py ignora
-operações já importadas via proposta_id_externo), então rodar várias vezes
-ao dia é seguro.
+A varredura de propostas travadas (SLA de minutos, não de horas) só faz
+sentido como intervalo curto — roda a cada 5 min enquanto o processo
+estiver ativo, igual ao beat_schedule original em workers/celery_app.py,
+mas chamando processar_proposta_core() direto (síncrono, mesmo núcleo
+usado pelo shim de dev e pela task Celery) em vez de enfileirar via
+Celery/Redis — não há garantia de que exista um worker consumindo essa
+fila neste ambiente.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -34,7 +35,10 @@ from app.core.logging import log
 
 SP_TZ = ZoneInfo("America/Sao_Paulo")
 JANELA_RETROATIVA_DIAS = 3  # margem de segurança para operações que chegaram atrasadas
-INTERVALO_HORAS = 2  # frequência de re-sync enquanto o backend está ativo
+INTERVALO_HORAS = 2  # frequência de re-sync da Titan enquanto o backend está ativo
+INTERVALO_VARREDURA_MINUTOS = 5  # frequência do robô de propostas travadas
+LIMITE_ENFILEIRADA_MINUTOS = 5  # ENFILEIRADA parada há mais que isso é reprocessada
+LIMITE_ANALISE_MINUTOS = 10     # EM_ANALISE parada há mais que isso vira ERRO
 
 scheduler = AsyncIOScheduler(timezone=SP_TZ)
 
@@ -54,6 +58,63 @@ async def _sync_titan_diario() -> None:
         log.info("scheduler.titan_sync_diario_concluido", **resultado)
     except Exception as exc:
         log.error("scheduler.titan_sync_diario_erro", error=str(exc))
+
+
+def _varredura_propostas_pendentes() -> None:
+    """
+    Resgata propostas travadas por queda de processo no meio do trabalho:
+      1. Reprocessa ENFILEIRADA presas há mais de 5 min.
+      2. Marca EM_ANALISE presas há mais de 10 min como ERRO.
+    Equivalente a propostas.robo.varredura (workers/tasks.py), mas roda
+    aqui porque aquela task só dispara via Celery Beat, que não está
+    configurado como serviço neste projeto.
+    """
+    from app.database import SessionLocal
+    from app.models import Proposta, StatusProposta, TipoEvento
+    from app.services.auditoria import AuditoriaService
+    from app.services.proposta_pipeline import processar_proposta_core
+
+    db = SessionLocal()
+    try:
+        agora = datetime.now(timezone.utc)
+        limite_enfileirada = agora - timedelta(minutes=LIMITE_ENFILEIRADA_MINUTOS)
+        limite_analise = agora - timedelta(minutes=LIMITE_ANALISE_MINUTOS)
+
+        travadas = db.query(Proposta).filter(
+            Proposta.status == StatusProposta.ENFILEIRADA,
+            Proposta.atualizado_em < limite_enfileirada,
+        ).all()
+        for p in travadas:
+            log.warning("scheduler.reprocessando_enfileirada", proposta_id=p.id, atualizado_em=p.atualizado_em.isoformat())
+            processar_proposta_core(db, p.id)
+
+        analise_travada = db.query(Proposta).filter(
+            Proposta.status == StatusProposta.EM_ANALISE,
+            Proposta.atualizado_em < limite_analise,
+        ).all()
+        for p in analise_travada:
+            log.error("scheduler.analise_travada", proposta_id=p.id)
+            p.status = StatusProposta.ERRO
+            p.ultimo_erro = "Processamento travado — reprocesse manualmente"
+            AuditoriaService(db).registrar(
+                p.id,
+                TipoEvento.ERRO,
+                dados={"motivo": "timeout_analise", "robo": True},
+            )
+
+        if analise_travada:
+            db.commit()
+
+        log.info(
+            "scheduler.varredura_concluida",
+            reprocessadas=len(travadas),
+            erro_timeout=len(analise_travada),
+        )
+    except Exception as exc:
+        db.rollback()
+        log.error("scheduler.varredura_erro", error=str(exc))
+    finally:
+        db.close()
 
 
 def iniciar_scheduler() -> None:
@@ -86,6 +147,15 @@ def iniciar_scheduler() -> None:
         id="titan_sync_diario",
         replace_existing=True,
         misfire_grace_time=3600,
+    )
+
+    # 4. Robô de varredura — resgata propostas travadas (equivalente ao
+    #    beat_schedule de workers/celery_app.py, que não roda de fato).
+    scheduler.add_job(
+        _varredura_propostas_pendentes,
+        IntervalTrigger(minutes=INTERVALO_VARREDURA_MINUTOS),
+        id="varredura_propostas_pendentes",
+        replace_existing=True,
     )
 
     scheduler.start()

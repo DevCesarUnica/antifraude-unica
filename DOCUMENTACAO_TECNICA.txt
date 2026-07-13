@@ -156,7 +156,8 @@ antifraude/
 │       │   ├── circuit_breaker.py ← Circuit Breaker para APIs externas
 │       │   ├── logging.py         ← Logs estruturados (structlog)
 │       │   └── scheduler.py       ← Agendador interno (APScheduler): sync
-│       │        automático com a Titan, sem depender de Celery Beat/worker
+│       │        automático com a Titan + varredura de propostas
+│       │        travadas, sem depender de Celery Beat/worker
 │       ├── routers/
 │       │   ├── auth.py            ← Login, logout, /me
 │       │   ├── propostas.py       ← CRUD propostas + dashboard + search
@@ -1103,14 +1104,17 @@ Em produção (Docker + Redis): worker Celery com queue "propostas".
 Task: processar_proposta(proposta_id)
   ENFILEIRADA → EM_ANALISE → motor → ANALISE_MANUAL ou BLOQUEADA
 
-Task: varredura (Celery Beat, cada 5 min — CONFIGURADO MAS NÃO ATIVO)
+Task: varredura (Celery Beat, cada 5 min — CONFIGURADA MAS NUNCA ATIVA)
   Reprocessa ENFILEIRADA presas > 5 min.
   Marca como ERRO: EM_ANALISE travadas > 10 min.
   Nenhum ambiente (dev ou docker-compose) roda um serviço `celery beat`,
-  então esse agendamento nunca dispara de fato hoje. Diferente do sync
-  do Titan (ver 4.32 e core/scheduler.py), esta tarefa NÃO foi migrada
-  para o agendador interno — continua exigindo reprocessamento manual
-  via POST /propostas/{id}/reprocessar.
+  então esse agendamento nunca dispara de fato — permanece no código só
+  para quando houver `celery beat` + worker reais em produção.
+
+  Migrada para core/scheduler.py::_varredura_propostas_pendentes() (ver
+  4.32), que roda a mesma lógica a cada 5 min dentro do próprio processo
+  do backend, chamando processar_proposta_core() direto (síncrono) em vez
+  de enfileirar via Celery — funciona mesmo sem worker/Redis disponível.
 
 
 ================================================================================

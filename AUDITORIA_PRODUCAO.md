@@ -272,11 +272,18 @@ sem alerta a ninguém.
   `grupos.py` (CRUD + vínculo, exceto `/importar-webdeck` que audita),
   `layouts.py`, `averbacoes.py`, `retornos_banco.py` (parcial),
   `pendencias.py`, `storm.py` (aprovar/recusar/pendenciar contratos reais).
-- **M5** — `services/banks/` (abstração `BankAdapter`) duplica e diverge
-  de `services/titan_envio.py` (fluxo real de envio). `HopeAdapter
-  .enviar_proposta()` afirma "Hope não tem endpoint de envio" — falso, o
-  envio real funciona via `titan_envio.py`, só que por um caminho
-  totalmente diferente que não passa pela abstração.
+- **M5 — ✅ CORRIGIDO** — `services/banks/` (abstração `BankAdapter`)
+  duplicava e divergia de `services/titan_envio.py` (fluxo real de envio).
+  `HopeAdapter.enviar_proposta()` afirmava "Hope não tem endpoint de
+  envio" — falso, o envio real funciona via `titan_envio.py`, só que por
+  um caminho totalmente diferente que não passava pela abstração.
+  Removido `enviar_proposta()`/`ResultadoEnvio` de `base.py` e `hope.py`
+  (confirmado zero chamadores em todo o backend) em vez de migrar
+  `titan_envio.py` para dentro da abstração — o fluxo de envio ao Titan é
+  específico demais (payload, idempotência, mapeamento de IDs) para
+  generalizar num contrato comum a todos os bancos. `BankAdapter`
+  continua valendo para `health_check`/`get_produtos`/`get_referencia`,
+  que são realmente usados por `routers/bancos.py`.
 - **M6** — `schemas_importacao.py` (177 linhas) é código morto — zero
   importadores em todo o backend.
 - **M7** — CORS com `allow_origins=["*"]` + `allow_credentials=True`
@@ -360,6 +367,16 @@ sem alerta a ninguém.
   Validado com CPF fictício via simulador — bloqueia de verdade agora.
   Ver detalhe completo na seção 2, CRÍTICO C1.
 
+- **M5 — `services/banks/` divergia de `titan_envio.py`.** Removido o
+  método `enviar_proposta()` (e o `ResultadoEnvio` que só ele usava) de
+  `BankAdapter`/`HopeAdapter` — confirmado que não tinha nenhum chamador
+  no backend. `HopeAdapter.enviar_proposta()` mentia dizendo que Hope não
+  tinha endpoint de envio; o envio real sempre funcionou via
+  `titan_envio.py` + `POST /propostas/{id}/enviar-banco`, só que por um
+  caminho diferente. Validado: backend reiniciado sem erro de import,
+  `GET /bancos/` (que usa `HopeAdapter` de verdade) respondendo normal.
+  Ver detalhe completo na seção 2, MÉDIO M5.
+
 O restante da lista (seção 4) continua aguardando priorização — auditoria
 primeiro, relatório mostrado, correções aplicadas uma de cada vez conforme
 você for pedindo.
@@ -392,7 +409,6 @@ você for pedindo.
 | C8 | Mover `_seed_admin` para só rodar em startup (não a cada login) é simples, mas quero confirmar que não há dependência operacional nesse comportamento hoje. |
 | A4 | Adicionar paginação real em `PropostasPage` muda a UX da tela mais usada do sistema — prefiro alinhar layout/comportamento com você antes. |
 | M4 | Adicionar auditoria em ~8 routers é mecânico, mas é volume grande de mudança — posso fazer em lote se você aprovar. |
-| M5 | `services/banks/` — decidir se vira a abstração real (migrar `titan_envio.py` para dentro dela) ou se é removida — mudança de arquitetura, não "bug claro". |
 
 ---
 

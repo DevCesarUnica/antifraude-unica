@@ -2,11 +2,14 @@
 Adapter para o banco Hope — plataforma Titan/Ceoslab.
 
 Fornece dados de referência (bancos, convênios, profissões, produtos Daycoval)
-via API REST. Envio de propostas ainda não tem endpoint dedicado; usar RPA.
+via API REST e health check da integração.
+
+Envio de proposta aprovada NÃO passa por este adapter — ver
+services/titan_envio.py e POST /propostas/{id}/enviar-banco.
 """
 import time
 
-from app.services.banks.base import BankAdapter, ResultadoEnvio, StatusIntegracao
+from app.services.banks.base import BankAdapter, StatusIntegracao
 from app.services.titan import TitanService, TitanAPIError
 
 
@@ -41,15 +44,6 @@ class HopeAdapter(BankAdapter):
     async def get_produtos(self) -> list[dict]:
         async with TitanService() as titan:
             return await titan.get_daycoval_products()
-
-    async def enviar_proposta(self, proposta: dict) -> ResultadoEnvio:
-        # Hope ainda não tem endpoint de submissão de proposta —
-        # apenas dados de referência. Usar RPA para envio.
-        return {
-            "sucesso": False,
-            "id_operacao": None,
-            "mensagem": "Hope API não possui endpoint de envio de proposta. Use o módulo RPA.",
-        }
 
     async def get_referencia(self) -> dict:
         """Retorna todos os dados de referência Titan em paralelo."""

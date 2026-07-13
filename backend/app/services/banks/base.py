@@ -5,15 +5,15 @@ Para adicionar um novo banco:
 1. Crie um arquivo em services/banks/<slug>.py
 2. Implemente a classe herdando de BankAdapter
 3. Registre a classe em registry.py
+
+Envio de proposta aprovada NÃO faz parte deste contrato — cada banco tem um
+fluxo próprio e específico demais para generalizar aqui (ex: Hope/Titan usa
+services/titan_envio.py, com payload, idempotência e mapeamento de IDs
+próprios da API Titan). Implemente o envio no módulo do banco e chame-o
+diretamente do router, como já é feito em routers/propostas.py::enviar_banco.
 """
 from abc import ABC, abstractmethod
-from typing import NotRequired, TypedDict
-
-
-class ResultadoEnvio(TypedDict):
-    sucesso: bool
-    id_operacao: str | None
-    mensagem: str
+from typing import TypedDict
 
 
 class StatusIntegracao(TypedDict):
@@ -53,11 +53,6 @@ class BankAdapter(ABC):
     @abstractmethod
     async def get_produtos(self) -> list[dict]:
         """Lista produtos disponíveis neste banco."""
-        ...
-
-    @abstractmethod
-    async def enviar_proposta(self, proposta: dict) -> ResultadoEnvio:
-        """Envia uma proposta ao banco. Implementar por API ou RPA."""
         ...
 
     async def consultar_operacao(self, id_operacao: str) -> dict:

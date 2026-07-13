@@ -16,11 +16,13 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
-from app.models import Corretor, ContatoCorretor, ImportacaoCorretor
+from app.models import Corretor, ContatoCorretor, ImportacaoCorretor, Usuario
+from app.routers.auth import verificar_token
 from app.schemas import (
     CorretorCreate, CorretorUpdate, CorretorOut,
     ContatoCreate, ContatoOut, ImportacaoOut, Mensagem,
 )
+from app.services.auditoria import log_auditoria
 
 router = APIRouter(prefix="/corretores", tags=["corretores"])
 
@@ -368,14 +370,24 @@ def listar_corretores(
 
 
 @router.post("/", response_model=CorretorOut, status_code=status.HTTP_201_CREATED)
-def criar_corretor(body: CorretorCreate, db: Session = Depends(get_db)):
+def criar_corretor(
+    body: CorretorCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     corretor = Corretor(**body.model_dump())
     db.add(corretor)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=400, detail="CPF ou código externo já cadastrado")
+    log_auditoria(
+        db, acao=f"Criou corretor {corretor.nome}", usuario=usuario, request=request,
+        tipo_entidade="corretor", entidade_id=corretor.id, depois=body.model_dump(mode="json"), risco="MEDIO",
+    )
+    db.commit()
     db.refresh(corretor)
     return corretor
 
@@ -393,19 +405,38 @@ def obter_corretor(corretor_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/{corretor_id}", response_model=CorretorOut)
-def atualizar_corretor(corretor_id: str, body: CorretorUpdate, db: Session = Depends(get_db)):
+def atualizar_corretor(
+    corretor_id: str,
+    body: CorretorUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     c = _get_ou_404(db, corretor_id)
     for campo, valor in body.model_dump(exclude_none=True).items():
         setattr(c, campo, valor)
+    log_auditoria(
+        db, acao=f"Atualizou corretor {c.nome}", usuario=usuario, request=request,
+        tipo_entidade="corretor", entidade_id=corretor_id, depois=body.model_dump(exclude_none=True, mode="json"), risco="MEDIO",
+    )
     db.commit()
     db.refresh(c)
     return c
 
 
 @router.delete("/{corretor_id}", response_model=Mensagem)
-def desativar_corretor(corretor_id: str, db: Session = Depends(get_db)):
+def desativar_corretor(
+    corretor_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     c = _get_ou_404(db, corretor_id)
     c.ativo = False
+    log_auditoria(
+        db, acao=f"Desativou corretor {c.nome}", usuario=usuario, request=request,
+        tipo_entidade="corretor", entidade_id=corretor_id, risco="ALTO",
+    )
     db.commit()
     return Mensagem(mensagem="Corretor desativado com sucesso")
 
@@ -422,7 +453,13 @@ def listar_contatos(corretor_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{corretor_id}/contatos", response_model=ContatoOut, status_code=status.HTTP_201_CREATED)
-def adicionar_contato(corretor_id: str, body: ContatoCreate, db: Session = Depends(get_db)):
+def adicionar_contato(
+    corretor_id: str,
+    body: ContatoCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     _get_ou_404(db, corretor_id)
     if body.principal:
         # Remove flag principal dos outros do mesmo tipo
@@ -432,13 +469,24 @@ def adicionar_contato(corretor_id: str, body: ContatoCreate, db: Session = Depen
         ).update({"principal": False})
     contato = ContatoCorretor(corretor_id=corretor_id, **body.model_dump())
     db.add(contato)
+    db.flush()
+    log_auditoria(
+        db, acao=f"Adicionou contato ao corretor {corretor_id}", usuario=usuario, request=request,
+        tipo_entidade="contato_corretor", entidade_id=contato.id, depois=body.model_dump(mode="json"), risco="BAIXO",
+    )
     db.commit()
     db.refresh(contato)
     return contato
 
 
 @router.delete("/{corretor_id}/contatos/{contato_id}", response_model=Mensagem)
-def remover_contato(corretor_id: str, contato_id: str, db: Session = Depends(get_db)):
+def remover_contato(
+    corretor_id: str,
+    contato_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     contato = db.query(ContatoCorretor).filter(
         ContatoCorretor.id == contato_id,
         ContatoCorretor.corretor_id == corretor_id,
@@ -446,6 +494,10 @@ def remover_contato(corretor_id: str, contato_id: str, db: Session = Depends(get
     if not contato:
         raise HTTPException(status_code=404, detail="Contato não encontrado")
     contato.ativo = False
+    log_auditoria(
+        db, acao=f"Removeu contato {contato_id} do corretor {corretor_id}", usuario=usuario, request=request,
+        tipo_entidade="contato_corretor", entidade_id=contato_id, risco="BAIXO",
+    )
     db.commit()
     return Mensagem(mensagem="Contato removido")
 
@@ -457,6 +509,7 @@ async def importar_corretores(
     request: Request,
     arquivo: UploadFile = File(...),
     db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
 ):
     """
     Importa corretores via CSV.
@@ -471,7 +524,7 @@ async def importar_corretores(
     importacao = ImportacaoCorretor(
         arquivo_nome=arquivo.filename,
         status="PROCESSANDO",
-        criado_por=request.headers.get("x-usuario"),
+        criado_por=usuario.username,
     )
     db.add(importacao)
     db.flush()
@@ -518,6 +571,11 @@ async def importar_corretores(
 
     from datetime import datetime
     importacao.concluido_em = datetime.utcnow()
+    log_auditoria(
+        db, acao=f"Importou corretores via CSV ({arquivo.filename})", usuario=usuario, request=request,
+        tipo_entidade="importacao_corretor", entidade_id=importacao.id,
+        depois={"total": total, "sucesso": sucesso, "erros": len(erros)}, risco="MEDIO",
+    )
     db.commit()
     db.refresh(importacao)
     return importacao

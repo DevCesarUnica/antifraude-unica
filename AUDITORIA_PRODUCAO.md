@@ -290,13 +290,29 @@ sem alerta a ninguém.
 
 ### 🟡 MÉDIO
 
-- **M1** — `SCORE_RISCO` ignora completamente o parâmetro documentado
-  `fatores: [{campo,valor,peso}]` — só avalia um fator hardcoded
-  (valor > 3× referência). Um admin que configure múltiplos fatores pela
-  tela `/regras` não recebe nenhum erro, mas eles são ignorados.
-- **M2** — `Corretor.limite_valor_diario` é campo morto: `LIMITE_DIARIO`
-  lê `params["limite_valor_diario"]` (global da regra), nunca o valor
-  individual cadastrado no corretor.
+- **M1 — ✅ CORRIGIDO (era só documentação)** — `SCORE_RISCO` "ignorava"
+  o parâmetro `fatores: [{campo,valor,peso}]`. Investigação mostrou que
+  isso nunca existiu de verdade: nem o motor nem a tela `/regras` jamais
+  suportaram `fatores` (a tela só expõe `valor_medio_referencia`) — era
+  uma descrição aspiracional só no `ONBOARDING_DESENVOLVEDOR.txt`, nunca
+  implementada nem no código nem na UI. Confirmado zero regras
+  `SCORE_RISCO` cadastradas no banco hoje — impacto real zero. Corrigida
+  a documentação (`ONBOARDING_DESENVOLVEDOR.txt` e
+  `DOCUMENTACAO_TECNICA.txt`) para descrever o comportamento real.
+- **M2 — ✅ CORRIGIDO** — `Corretor.limite_valor_diario` era campo morto:
+  editável na tela de Corretores e exibido em Relatórios, mas
+  `_limite_diario()` só lia `params["limite_valor_diario"]` (valor
+  global da regra), nunca o campo individual. Diferente do M1, este
+  era um bug real e ativo — um admin configurando limite por corretor
+  via UI via tinha o valor salvo, mas o motor nunca o considerava.
+  Corrigido: `_limite_diario()` agora prioriza o limite individual do
+  corretor quando cadastrado (`> 0`), caindo para o global da regra
+  caso contrário. Confirmado zero risco de mudança de comportamento
+  hoje: nenhum dos 3.324 corretores tem `limite_valor_diario > 0`
+  cadastrado, e não há nenhuma regra `LIMITE_DIARIO` ativa no banco.
+  Validado com teste direto do motor (dois cenários: limite do corretor
+  prevalecendo sobre o global, e fallback para o global quando o
+  corretor não tem limite individual).
 - **M3 — ✅ CORRIGIDO (era a documentação, não o código)** — Hardcode de
   `"HOPE"` fora dos dois locais documentados como únicos permitidos:
   `routers/buscar.py:71` também hardcoda `"banco": "HOPE"`, mas dentro de
@@ -304,11 +320,30 @@ sem alerta a ninguém.
   busca vindo da Titan — mesmo raciocínio do `hope_adapter.py`, código
   correto. Só o `ONBOARDING_DESENVOLVEDOR.txt` ("REGRA 1: só dois
   lugares") estava desatualizado; corrigido para citar os três.
-- **M4** — Endpoints mutantes sem nenhuma auditoria: `convenios.py`,
-  `corretores.py` (CRUD + contatos + importação em massa),
-  `grupos.py` (CRUD + vínculo, exceto `/importar-webdeck` que audita),
-  `layouts.py`, `averbacoes.py`, `retornos_banco.py` (parcial),
-  `pendencias.py`, `storm.py` (aprovar/recusar/pendenciar contratos reais).
+- **M4 — RE-ESCOPADO, mais grave do que a descrição original.**
+  Endpoints mutantes sem auditoria: `convenios.py`, `corretores.py`,
+  `grupos.py` (exceto `/importar-webdeck`), `layouts.py`, `averbacoes.py`,
+  `retornos_banco.py` (parcial), `pendencias.py`, `storm.py` (parcial).
+  Investigação mostrou que 6 desses routers inteiros
+  (`convenios.py`, `corretores.py`, `layouts.py`, `averbacoes.py`,
+  `retornos_banco.py`, `pendencias.py`) **não têm nenhuma autenticação**
+  — não é só falta de auditoria, é falta de controle de acesso (~22
+  endpoints de escrita abertos a qualquer chamador de rede, sem login).
+  **✅ CORRIGIDO parcialmente**: `corretores.py` (CRUD + contatos +
+  importação CSV) e `averbacoes.py` (criar/atualizar/confirmar/cancelar)
+  agora exigem `Depends(verificar_token)` + `log_auditoria()` em todos os
+  endpoints de escrita, mesmo padrão de `propostas.py`. `convenios.py`,
+  `layouts.py`, `retornos_banco.py` e `pendencias.py` continuam sem
+  autenticação — aguardando decisão explícita antes de mexer (ver seção
+  4.2). Validado numa instância isolada (porta 8010, fora do processo de
+  dev real): sem token → 403 nos dois routers; com token válido → 201 e
+  registro real na `logs_auditoria` (confirmado via query direta).
+  Corrigido também um bug introduzido nesta própria correção: os
+  primeiros `log_auditoria()` foram escritos *depois* do `db.commit()` —
+  como `log_auditoria` só abre um SAVEPOINT (não comita a transação
+  externa), o registro nunca era persistido de verdade. Reordenado para
+  `log_auditoria()` antes do `commit()` final, mesmo padrão já usado
+  (corretamente) em `propostas.py` e `grupos.py::importar_esteiras_webdeck`.
 - **M5 — ✅ CORRIGIDO** — `services/banks/` (abstração `BankAdapter`)
   duplicava e divergia de `services/titan_envio.py` (fluxo real de envio).
   `HopeAdapter.enviar_proposta()` afirmava "Hope não tem endpoint de
@@ -364,9 +399,15 @@ sem alerta a ninguém.
   calculada com `GROUP BY` sobre a base inteira (`ativo=True`), não sobre
   a página atual — confirmado correto, só a tabela desta auditoria não
   tinha sido atualizada.
-- **M14** — `DashboardPropostasTable.tsx` não usa React Query; após uma
-  ação (aprovar/bloquear) os KPIs do topo do dashboard só atualizam até
-  10s depois (intervalo de refetch), sem invalidação imediata.
+- **M14 — ✅ CORRIGIDO (fix cirúrgico, sem o refactor completo)** —
+  `DashboardPropostasTable.tsx` não usa React Query para sua própria
+  lista (state manual); os KPIs do topo (`DashboardPage.tsx`, query
+  `["summary"]`) só atualizavam até 10s depois de aprovar/bloquear, sem
+  invalidação imediata. Em vez de migrar a tabela inteira para React
+  Query (refactor maior, mais risco), adicionado `useQueryClient()` +
+  `invalidateQueries({queryKey: ["summary"]})` nos dois pontos de ação
+  (`acaoModal` e `executarLote`) — os cards do topo agora atualizam na
+  hora, sem esperar o próximo ciclo de 10s.
 - **M15 — melhorado** — `TipoRegra.LIMITE_CORRETOR_SHADOW` pode ser
   cadastrado pela tela `/regras` sem nenhum aviso de que não tem
   avaliador — dá falsa sensação de cobertura. Investigação mostrou que o
@@ -546,8 +587,42 @@ sem alerta a ninguém.
   /importacoes/historico` movida para antes de `GET /{corretor_id}`,
   seguindo o padrão já correto de `grupos.py`.
 
+- **M4 (parcial) — Autenticação em `corretores.py` e `averbacoes.py`.**
+  Por decisão explícita do usuário, protegidos primeiro os módulos mais
+  sensíveis entre os 6 routers sem autenticação nenhuma encontrados:
+  `corretores.py` (7 endpoints: criar/atualizar/desativar corretor,
+  adicionar/remover contato, importar CSV) e `averbacoes.py` (4
+  endpoints: criar/atualizar/confirmar/cancelar). Todos ganharam
+  `Depends(verificar_token)` + `log_auditoria()`, mesmo padrão de
+  `propostas.py`. `criar_corretor` também ganhou tratamento de
+  `IntegrityError` reordenado (flush antes do commit, para poder logar
+  o ID gerado). `convenios.py`, `layouts.py`, `retornos_banco.py` e
+  `pendencias.py` continuam abertos — não mexidos por instrução
+  explícita, aguardando nova decisão.
+
+- **M1 — documentação, não código.** `SCORE_RISCO` nunca teve suporte a
+  múltiplos fatores, nem no motor nem na tela `/regras` — a menção a
+  `fatores: [{campo,valor,peso}]` só existia no ONBOARDING. Corrigida a
+  documentação para descrever o comportamento real (1 fator hardcoded).
+
+- **M2 — `Corretor.limite_valor_diario` passa a ser considerado.**
+  `_limite_diario()` em `antifraude.py` agora usa o limite individual do
+  corretor quando cadastrado (`> 0`), com fallback pro limite global da
+  regra. Zero corretores tinham esse campo preenchido hoje, então a
+  correção não muda nenhum comportamento existente — só passa a
+  funcionar quando alguém configurar. Validado com teste direto do motor
+  (dois cenários, sem passar pelo HTTP).
+
+- **M14 — Invalidação imediata dos KPIs do dashboard.** Adicionado
+  `invalidateQueries(["summary"])` em `DashboardPropostasTable.tsx` após
+  aprovar/bloquear (individual e em lote) — sem precisar migrar a tabela
+  inteira para React Query.
+
 O restante da lista (seção 4) continua aguardando priorização — itens que
-precisam de decisão de negócio/produto ficam na seção 4.2.
+precisam de decisão de negócio/produto ficam na seção 4.2. Não avaliados
+nesta rodada: M8 (nomes de tabela confusos), M9 (tipagem `status`
+inconsistente), M10 (sem Alembic real — mudança de infraestrutura maior),
+itens 🟢 BAIXO.
 
 ---
 
@@ -573,8 +648,9 @@ precisam de decisão de negócio/produto ficam na seção 4.2.
 | C2, C4, C5, C6/C7, C8 | ✅ **FEITOS** em sessão anterior a esta (ver `PROBLEMAS_PENDENTES.txt`) — tabela mantida só por rastreabilidade histórica. |
 | A4 | ✅ **FEITO** — ver seção 3 (paginação real implementada e o usuário optou por não bloquear aguardando validação manual). |
 | M4 | Adicionar auditoria em ~8 routers é mecânico, mas é volume grande de mudança — posso fazer em lote se você aprovar. |
-| A3 | `POST /corretores/importar` e `POST /importacoes/propostas` não têm autenticação nenhuma hoje — corrigir o `criado_por` forjável exige antes decidir se esses endpoints passam a exigir token (mesmo risco do C4: pode quebrar automação hoje sem token). |
+| A3 | ✅ **PARCIAL** — `POST /corretores/importar` corrigido junto com o M4 (agora exige token; `criado_por` usa `usuario.username`, não mais o header forjável). `POST /importacoes/propostas` (router `importacoes.py`) continua sem autenticação nenhuma — fora do escopo aprovado nesta rodada (só Corretores/Averbações). |
 | A6 | Forçar `resolver_corretor()` na importação CSV muda o resultado de importações que hoje funcionam sem essa validação — quero seu aval antes de potencialmente rejeitar/alterar vínculos que já são tratados como válidos operacionalmente. |
+| M4 (restante) | `convenios.py`, `layouts.py`, `retornos_banco.py`, `pendencias.py` continuam sem nenhuma autenticação — mesmo risco de quebrar automação hoje sem token. Aguardando decisão para proteger (igual já feito em `corretores.py`/`averbacoes.py`). |
 
 ---
 

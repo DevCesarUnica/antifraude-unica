@@ -279,14 +279,24 @@ class MotorAntifraude:
         return ResultadoRegra(disparou=False)
 
     def _limite_diario(self, proposta: Proposta, params: dict, peso: int, bloqueante: bool) -> ResultadoRegra:
-        """Verifica se o corretor ultrapassou o volume diário permitido."""
+        """
+        Verifica se o corretor ultrapassou o volume diário permitido.
+
+        Prioriza o limite individual do corretor (Corretor.limite_valor_diario,
+        configurável na tela de Corretores) quando cadastrado (> 0); cai para o
+        limite global da regra (params["limite_valor_diario"]) caso contrário.
+        Antes só o valor global era considerado — o campo por corretor existia
+        na tela e em Relatórios, mas o motor nunca olhava para ele
+        (AUDITORIA_PRODUCAO.md, M2).
+        """
         if not proposta.corretor_id:
             return ResultadoRegra(disparou=False)
 
         from app.models import Proposta as P, StatusProposta
         from sqlalchemy import func
 
-        limite = params.get("limite_valor_diario", 0)
+        limite_corretor = (proposta.corretor.limite_valor_diario or 0) if proposta.corretor else 0
+        limite = limite_corretor if limite_corretor > 0 else params.get("limite_valor_diario", 0)
         hoje = date.today()
 
         total_hoje = self._db.query(func.sum(P.valor)).filter(

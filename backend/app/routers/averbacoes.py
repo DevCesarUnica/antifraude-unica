@@ -3,12 +3,14 @@ Router de averbações — registro formal de propostas no banco/convênio.
 """
 
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Averbacao, Proposta, StatusAverbacao
+from app.models import Averbacao, Proposta, StatusAverbacao, Usuario
+from app.routers.auth import verificar_token
 from app.schemas import AverbacaoCreate, AverbacaoUpdate, AverbacaoOut, Mensagem
+from app.services.auditoria import log_auditoria
 
 router = APIRouter(prefix="/averbacoes", tags=["averbacoes"])
 
@@ -30,13 +32,24 @@ def listar_averbacoes(
 
 
 @router.post("/propostas/{proposta_id}", response_model=AverbacaoOut, status_code=status.HTTP_201_CREATED)
-def averbar_proposta(proposta_id: str, body: AverbacaoCreate, db: Session = Depends(get_db)):
+def averbar_proposta(
+    proposta_id: str,
+    body: AverbacaoCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     proposta = db.query(Proposta).filter(Proposta.id == proposta_id).first()
     if not proposta:
         raise HTTPException(status_code=404, detail="Proposta não encontrada")
 
     averbacao = Averbacao(proposta_id=proposta_id, **body.model_dump())
     db.add(averbacao)
+    db.flush()
+    log_auditoria(
+        db, acao=f"Criou averbação para proposta {proposta_id}", usuario=usuario, request=request,
+        tipo_entidade="averbacao", entidade_id=averbacao.id, depois=body.model_dump(mode="json"), risco="MEDIO",
+    )
     db.commit()
     db.refresh(averbacao)
     return averbacao
@@ -48,33 +61,63 @@ def listar_averbacoes_proposta(proposta_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/{averbacao_id}", response_model=AverbacaoOut)
-def atualizar_averbacao(averbacao_id: str, body: AverbacaoUpdate, db: Session = Depends(get_db)):
+def atualizar_averbacao(
+    averbacao_id: str,
+    body: AverbacaoUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     av = _get_ou_404(db, averbacao_id)
     for campo, valor in body.model_dump(exclude_none=True).items():
         setattr(av, campo, valor)
     if body.status == StatusAverbacao.AVERBADO and not av.data_averbacao:
         av.data_averbacao = datetime.now(timezone.utc)
+    log_auditoria(
+        db, acao=f"Atualizou averbação {averbacao_id}", usuario=usuario, request=request,
+        tipo_entidade="averbacao", entidade_id=averbacao_id, depois=body.model_dump(exclude_none=True, mode="json"), risco="MEDIO",
+    )
     db.commit()
     db.refresh(av)
     return av
 
 
 @router.post("/{averbacao_id}/confirmar", response_model=AverbacaoOut)
-def confirmar_averbacao(averbacao_id: str, numero_operacao: str | None = None, db: Session = Depends(get_db)):
+def confirmar_averbacao(
+    averbacao_id: str,
+    request: Request,
+    numero_operacao: str | None = None,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     av = _get_ou_404(db, averbacao_id)
     av.status = StatusAverbacao.AVERBADO
     av.data_averbacao = datetime.now(timezone.utc)
     if numero_operacao:
         av.numero_operacao = numero_operacao
+    log_auditoria(
+        db, acao=f"Confirmou averbação {averbacao_id}", usuario=usuario, request=request,
+        tipo_entidade="averbacao", entidade_id=averbacao_id,
+        depois={"numero_operacao": numero_operacao}, risco="MEDIO",
+    )
     db.commit()
     db.refresh(av)
     return av
 
 
 @router.post("/{averbacao_id}/cancelar", response_model=AverbacaoOut)
-def cancelar_averbacao(averbacao_id: str, db: Session = Depends(get_db)):
+def cancelar_averbacao(
+    averbacao_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(verificar_token),
+):
     av = _get_ou_404(db, averbacao_id)
     av.status = StatusAverbacao.CANCELADO
+    log_auditoria(
+        db, acao=f"Cancelou averbação {averbacao_id}", usuario=usuario, request=request,
+        tipo_entidade="averbacao", entidade_id=averbacao_id, risco="ALTO",
+    )
     db.commit()
     db.refresh(av)
     return av

@@ -470,14 +470,30 @@ TIPOS DE REGRA (campo "tipo" na tabela):
                    params: { "combinacoes": [["HOPE","CONVENIO_X"], ...] }
   UF_BLOQUEADA   — bloqueia se cliente for de estado bloqueado
                    params: { "ufs": ["SP", "RJ"] }
-  SCORE_RISCO    — soma fatores de risco configuráveis ao score
-                   params: { fatores: [{campo, valor, peso}, ...] }
+  SCORE_RISCO    — hoje avalia só UM fator hardcoded: valor da proposta
+                   > 3x o valor de referência. NÃO existe suporte a
+                   múltiplos fatores configuráveis apesar do nome
+                   genérico (AUDITORIA_PRODUCAO.md, achado M1 — isso já
+                   era uma imprecisão só da documentação: nunca existiu
+                   suporte a "fatores" nem no motor nem na tela /regras,
+                   e não há nenhuma regra desse tipo cadastrada no banco
+                   hoje). Se precisar de múltiplos fatores, é uma
+                   funcionalidade nova a construir, não um bug a corrigir.
+                   params: { "valor_medio_referencia": 10000.00 }
   LIMITE_DIARIO  — bloqueia se corretor ultrapassaria limite diário
                    params: { "limite_valor_diario": 100000.00 }
-  LIMITE_CORRETOR_SHADOW — placeholder no enum tipo_regra, SEM avaliador
-                   implementado ainda. Depende do vínculo Corretor×Esteira
-                   (ver ANALISE_VINCULO_CORRETOR_PROPOSTA.md). Uma regra
-                   deste tipo é aceita pelo CRUD mas nunca dispara hoje.
+  LIMITE_CORRETOR_SHADOW — TEM avaliador (_limite_corretor_shadow em
+                   antifraude.py), ao contrário do que este documento
+                   dizia antes. Compara proposta.valor contra o limite
+                   da Esteira Comercial (GrupoCorretor) vinculada ao
+                   corretor da proposta. Defesa em profundidade: SEMPRE
+                   score_contribuicao=0 e bloqueante=False, ignorando os
+                   valores da regra — nunca pode bloquear/pontuar, mesmo
+                   que shadow_mode seja desligado na tela. Gerada
+                   automaticamente por esteira via
+                   app/services/gerar_regras_esteiras.py — não editar o
+                   parâmetro "limite" manualmente, ele é ressincronizado
+                   a partir da esteira a cada rodada do backfill.
                    Esteiras Comerciais é um módulo separado do motor de
                    regras — não misturar dados de um com o outro.
 

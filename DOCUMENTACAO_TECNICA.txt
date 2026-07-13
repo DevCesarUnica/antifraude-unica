@@ -953,12 +953,19 @@ TIPOS DE REGRA E PARÂMETROS (parametros é JSONB):
   VALOR_MAXIMO           → valor > params["valor_maximo"]
   BANCO_CONVENIO         → (banco, convenio) em params["combinacoes"] [[b,c], ...]
   UF_BLOQUEADA           → uf_cliente em params["ufs"] ["SP", "RJ", ...]
-  SCORE_RISCO            → score composto por vários fatores configuráveis
+  SCORE_RISCO            → hoje só 1 fator hardcoded: valor > 3x
+                           params["valor_medio_referencia"]. Não há suporte a
+                           múltiplos fatores apesar do nome genérico (nunca
+                           existiu, nem no motor nem na tela /regras —
+                           AUDITORIA_PRODUCAO.md, M1). Zero regras deste tipo
+                           cadastradas hoje.
   LIMITE_DIARIO          → soma diária do corretor > params["limite_valor_diario"]
-  LIMITE_CORRETOR_SHADOW → placeholder no enum, SEM avaliador implementado
-                           ainda (depende do vínculo Corretor×Esteira da Fase 2,
-                           ver ANALISE_VINCULO_CORRETOR_PROPOSTA.md). Uma regra
-                           deste tipo é aceita pelo CRUD mas nunca dispara hoje.
+  LIMITE_CORRETOR_SHADOW → TEM avaliador (_limite_corretor_shadow), compara
+                           proposta.valor contra o limite da Esteira Comercial
+                           (GrupoCorretor) do corretor vinculado. Defesa em
+                           profundidade: nunca soma score nem bloqueia,
+                           mesmo com shadow_mode desligado. Gerada
+                           automaticamente por app/services/gerar_regras_esteiras.py.
                            NÃO confundir com Esteiras Comerciais — módulo à parte.
 
 SAÍDA SALVA NA PROPOSTA:
@@ -1478,7 +1485,7 @@ ENTRADA: proposta com status = ENFILEIRADA
   │    VALOR_MAXIMO   — valor > limite?                          │
   │    BANCO_CONVENIO — combinação na lista proibida?            │
   │    UF_BLOQUEADA   — UF do cliente bloqueada?                 │
-  │    SCORE_RISCO    — fatores de risco configuráveis           │
+  │    SCORE_RISCO    — valor > 3x referência (só 1 fator hoje)  │
   │    LIMITE_DIARIO  — corretor ultrapassaria limite diário?    │
   │                                                              │
   │    Se disparou E bloqueante → BLOQUEADA (retorna imediato)   │

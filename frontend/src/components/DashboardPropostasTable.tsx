@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -427,6 +428,7 @@ const inputCls: React.CSSProperties = {
 const LIMIT = 50;
 
 export default function DashboardPropostasTable() {
+  const qc = useQueryClient();
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
@@ -491,6 +493,7 @@ export default function DashboardPropostasTable() {
     await fn(modalProposta.id);
     setModalProposta(null);
     carregar(skip);
+    qc.invalidateQueries({ queryKey: ["summary"] });
   };
 
   const toggleSelecionado = (id: string) => {
@@ -526,6 +529,7 @@ export default function DashboardPropostasTable() {
     setExecutandoLote(false);
     setSelecionados(new Set());
     carregar(skip);
+    qc.invalidateQueries({ queryKey: ["summary"] });
   };
 
   return (

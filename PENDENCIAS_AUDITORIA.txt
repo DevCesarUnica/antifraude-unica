@@ -1,0 +1,120 @@
+================================================================================
+  PENDÊNCIAS DA AUDITORIA DE PRODUÇÃO — O QUE AINDA FALTA
+================================================================================
+  Última atualização: 13/07/2026
+  Projeto: Sistema Antifraude - Unica Promotora
+  Detalhe técnico completo (arquivo:linha, cenário de falha) de cada achado
+  em AUDITORIA_PRODUCAO.md, seções 2 e 4.
+================================================================================
+
+Todos os CRÍTICOS (C1-C8) já estão corrigidos (ver PROBLEMAS_PENDENTES.txt).
+A maioria dos ALTO e vários MÉDIO também já foram corrigidos nesta sessão
+(A1, A2, A4, A5, A7, A8, A9, A10, M1, M2, M3, M5, M6, M7, M11, M12, M13,
+M14, M15, M16, e parte do M4). O que segue abaixo é o que ainda falta.
+
+
+================================================================================
+  1. PRECISAM DE DECISÃO SUA ANTES DE MEXER
+================================================================================
+
+Todos estes têm o mesmo tipo de risco: mudar quem pode chamar um endpoint
+hoje aberto pode quebrar alguma automação/script/integração que já depende
+dele funcionar sem login.
+
+--------------------------------------------------------------------------------
+A3/M4 — 4 ROUTERS INTEIROS SEM AUTENTICAÇÃO NENHUMA
+--------------------------------------------------------------------------------
+Já protegidos (por decisão sua, nesta sessão): corretores.py, averbacoes.py.
+
+Ainda abertos — qualquer chamador de rede pode criar/editar/excluir sem
+login nenhum:
+
+  convenios.py       → POST/PATCH/DELETE de convênios
+  layouts.py         → POST/PATCH/DELETE de layouts de importação CSV
+                        + mapeamentos
+  retornos_banco.py  → POST criar retorno, POST processar retorno
+  pendencias.py      → POST criar, PATCH atualizar, POST resolver,
+                        DELETE pendência
+
+  importacoes.py     → POST /importacoes/propostas (import de propostas
+                        via CSV) também sem autenticação — não estava no
+                        escopo aprovado desta rodada (só corretores.py/
+                        averbacoes.py foram protegidos)
+
+Para proteger: mesmo padrão já aplicado em corretores.py/averbacoes.py —
+adicionar `usuario: Usuario = Depends(verificar_token)` + `log_auditoria()`
+(chamado ANTES do commit final, não depois — SAVEPOINT sem commit externo
+não persiste).
+
+--------------------------------------------------------------------------------
+A6 — IMPORTAÇÃO CSV PODE SETAR corretor_id SEM VALIDAÇÃO
+--------------------------------------------------------------------------------
+routers/importacoes.py aceita mapear uma coluna do CSV direto para
+Proposta.corretor_id, ignorando resolver_corretor() (a "regra de ouro" de
+nunca vincular corretor sem confiança). Forçar a validação aqui muda o
+resultado de importações que hoje funcionam sem ela — pode rejeitar ou
+alterar vínculos que times operacionais já tratam como válidos.
+
+
+================================================================================
+  2. NÃO AVALIADOS NESTA RODADA (menor prioridade / maior escopo)
+================================================================================
+
+M8  — Nomes de tabela confusos: AuditoriaLog (auditoria_logs) vs.
+      LogAuditoria (logs_auditoria) — quase-anagramas em português para
+      propósitos diferentes (eventos de proposta vs. ações de usuário).
+      Renomear é risco de refactor grande para ganho cosmético.
+
+M9  — ImportacaoProposta.status usa Enum real, ImportacaoCorretor.status
+      usa String(20) livre — tabelas quase gêmeas com tipagem
+      inconsistente. O importador WebDeck não usa nenhuma das duas, então
+      urgência baixa.
+
+M10 — Sem Alembic real: schema evolui via create_all() + scripts .sql
+      soltos, sem tracking de quais já rodaram em cada ambiente. Mudança
+      de infraestrutura maior, fora do escopo de uma correção pontual.
+
+
+================================================================================
+  3. ITENS 🟢 BAIXO (cosmético / código morto, sem risco funcional)
+================================================================================
+
+- Colunas/relationships mortos: LogAcesso.username (sempre None),
+  GrupoCorretor.corretores, Proposta.auditoria, Corretor.propostas
+  (relationships SQLAlchemy nunca acessados via atributo).
+- Lógica duplicada _str()/_cpf_digits() entre hope_adapter.py e
+  storm_adapter.py — candidatos a extrair para util comum.
+- frontend/src/lib/hopeAdapter.ts e stormAdapter.ts — arquivos inteiros
+  nunca importados.
+- ~25 funções exportadas em api.ts nunca chamadas por nenhuma página
+  (módulos sem UI: Averbações, Retornos de Banco, parte de
+  Corretores/Contatos, Titan direto).
+- Duplicação de helpers (fmtBRL, fmtCPF) entre componentes — sem
+  lib/format.ts compartilhado (StatusBadge já foi unificado no A8 desta
+  sessão, mas fmtBRL/fmtCPF ainda duplicam).
+- RegraAntifraude.peso_score sem CHECK >= 0.
+- retornos_banco.py::_mapear_status mapeia REPROVACAO e CANCELAMENTO
+  para o mesmo StatusProposta.REPROVADA, perdendo distinção semântica.
+- Uso inconsistente de alert()/confirm() nativos vs. banners inline.
+- PropostasPage e a Mesa de Crédito são duas implementações paralelas do
+  mesmo conceito ("listar propostas") — candidato a consolidação.
+- Falta de diretório hooks/ no frontend — lógica de fetch/filtro
+  duplicada inline em cada página.
+- docker-compose.yml define NEXT_PUBLIC_API_URL (convenção Next.js) para
+  um projeto Vite — variável provavelmente nunca lida.
+- Endpoints órfãos sem UI: POST /propostas/reprocessar-aprovadas,
+  POST /titan/operacoes, GET /titan/operacoes/{id}.
+- blacklist.py redeclara seu próprio get_db() idêntico ao de
+  app.database, em vez de importar.
+
+
+================================================================================
+  4. RECOMENDAÇÃO DE PRIORIZAÇÃO (se for retomar)
+================================================================================
+
+  1º — Decidir sobre a autenticação dos 5 endpoints/routers restantes
+       (seção 1) — é o maior risco de segurança ainda aberto.
+  2º — M8/M9/M10 só valem a pena se o time estiver crescendo e a confusão
+       de nomes/tipagem já estiver causando bug real.
+  3º — Itens BAIXO: batch de limpeza quando houver uma janela de baixo
+       risco (não bloqueiam nada, não afetam usuário final).

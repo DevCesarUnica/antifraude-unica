@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.logging import configurar_logs as configure_logging
+from app.core.scheduler import iniciar_scheduler, parar_scheduler
 from app.database import engine, Base, SessionLocal
 from app.routers import (
     propostas, regras, titan, auth, bancos, usuarios, storm,
@@ -30,7 +31,9 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    iniciar_scheduler()
     yield
+    parar_scheduler()
 
 
 app = FastAPI(

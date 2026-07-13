@@ -197,10 +197,15 @@ sem alerta a ninguém.
 
 ### 🟠 ALTO
 
-- **A1 — Cache "envenenado" do Titan em erro.** `titan.py:318-332`: quando
-  a API Titan falha, `_get()` cacheia a resposta **mock** por 300s. Mesmo
-  depois do Titan voltar, chamadas dentro dessa janela continuam recebendo
-  dado mock, sem invalidação automática — só `DELETE /titan/cache` manual.
+- **A1 — ✅ CORRIGIDO** — Cache "envenenado" do Titan em erro.
+  `titan.py:318-332`: quando a API Titan falhava, `_get()` cacheava a
+  resposta **mock** por 300s sob a mesma chave dos dados reais. Mesmo
+  depois do Titan voltar, chamadas dentro dessa janela continuavam
+  recebendo dado mock, sem invalidação automática. Corrigido removendo o
+  cache do fallback mock (`_set_cache_ttl` e o método inteiro, que ficou
+  órfão, foram removidos) — a próxima chamada sempre tenta a API real de
+  novo; o circuit breaker já existente evita bater na API repetidamente
+  enquanto ela estiver fora do ar.
 - **A2 — ✅ CORRIGIDO** — `_auto_mapear_convenio` sem tratamento de corrida.
   `antifraude.py:152-166` fazia SELECT-then-INSERT em `Convenio` (que tem
   `UNIQUE(nome)`) sem `try/except IntegrityError`. Duas propostas
@@ -211,10 +216,16 @@ sem alerta a ninguém.
   `IntegrityError` (corrida confirmada, convênio já existe), o savepoint é
   revertido automaticamente e o processamento segue normalmente, sem subir
   a exceção para `_processar_sync`.
-- **A3 — Header HTTP arbitrário usado como autoria.** `corretores.py:271`,
-  `importacoes.py:59`: `criado_por=request.headers.get("x-usuario")` —
-  qualquer chamador pode forjar `X-Usuario: admin` sem nenhuma verificação
-  contra o JWT, corrompendo a trilha de autoria da importação.
+- **A3 — Header HTTP arbitrário usado como autoria — RE-ESCOPADO, precisa
+  decisão (ver seção 4.2).** `corretores.py:271`, `importacoes.py:59`:
+  `criado_por=request.headers.get("x-usuario")` — qualquer chamador pode
+  forjar `X-Usuario: admin`. Investigação mostrou que o problema é maior
+  do que a descrição original sugeria: `POST /corretores/importar` e
+  `POST /importacoes/propostas` **não têm nenhuma autenticação hoje**
+  (nenhum `Depends(verificar_token)` no arquivo inteiro) — não é só
+  trocar a fonte do `criado_por`, é decidir se esses dois endpoints
+  passam a exigir token, com o mesmo risco já sinalizado no C4
+  (poderia quebrar alguma automação que hoje chama sem token).
 - **A4 — ✅ CORRIGIDO** — `PropostasPage.tsx` sem paginação nenhuma.
   `GET /propostas/` era chamado sem `skip`/`limit` explícitos e o
   cabeçalho mostrava `propostas.length` (travado em 50, o default do
@@ -229,17 +240,26 @@ sem alerta a ninguém.
   nos três em `models.py` e aplicado `CREATE INDEX IF NOT EXISTS` no
   banco de desenvolvimento real (`migrate_indices_fks_a5.sql` — rodar
   também em produção).
-- **A6 — Importação manual de CSV pode setar `corretor_id` sem confiança.**
-  `routers/importacoes.py:21,70-78,97` aceita mapear uma coluna do CSV
-  direto para `Proposta.corretor_id`, ignorando completamente
-  `resolver_corretor()` — quebra a "regra de ouro" documentada no próprio
-  `resolver_corretor.py` ("nunca vincula sem confiança"). Único freio é a
-  FK do Postgres (id inexistente derruba a linha); um `corretor_id` válido
-  mas errado passa sem alerta.
-- **A7 — Valores monetários como `Float`, sem `CHECK >= 0`.**
-  `Proposta.valor`, `GrupoCorretor.limite_valor`,
+- **A6 — Importação manual de CSV pode setar `corretor_id` sem confiança
+  — precisa decisão (ver seção 4.2).** `routers/importacoes.py:21,70-78,97`
+  aceita mapear uma coluna do CSV direto para `Proposta.corretor_id`,
+  ignorando completamente `resolver_corretor()` — quebra a "regra de
+  ouro" documentada no próprio `resolver_corretor.py` ("nunca vincula sem
+  confiança"). Único freio é a FK do Postgres (id inexistente derruba a
+  linha); um `corretor_id` válido mas errado passa sem alerta. Forçar
+  `resolver_corretor()` aqui muda o comportamento de importações CSV que
+  hoje funcionam — pode rejeitar/alterar vínculos que times operacionais
+  já contam como válidos.
+- **A7 — ✅ CORRIGIDO** — Valores monetários como `Float`, sem
+  `CHECK >= 0`. `Proposta.valor`, `GrupoCorretor.limite_valor`,
   `Corretor.limite_valor_diario` — todos `Float` (IEEE-754) em sistema
   financeiro, sem nenhuma constraint impedindo valor negativo.
+  Confirmado (`SELECT COUNT(*) WHERE valor < 0`) zero violações
+  existentes nas 3 tabelas antes de aplicar. Adicionado `CheckConstraint`
+  nos 3 models e `migrate_check_valores_nao_negativos_a7.sql` (bloco
+  `DO $$ ... EXCEPTION WHEN duplicate_object`, já que `ADD CONSTRAINT`
+  não aceita `IF NOT EXISTS` no Postgres) — aplicada no banco de dev,
+  **rodar também em produção** (checando antes que não há violações lá).
 - **A8 — ✅ CORRIGIDO** — Badge de status com cores invertidas entre
   telas. `PropostasPage.tsx` tinha sua própria paleta divergente da usada
   em `DashboardPropostasTable.tsx`/`PropostaDetalheModal.tsx` (que já
@@ -446,6 +466,25 @@ sem alerta a ninguém.
   `Blacklist.ativo == True` já estava presente em `antifraude.py:206` —
   item já resolvido, a tabela da seção 4.1 só não tinha sido atualizada.
 
+- **A1 — Cache do Titan envenenado em erro.** Removido o cache do
+  fallback mock (método `_set_cache_ttl` ficou órfão e foi excluído) —
+  falha da API Titan não polui mais o cache real; a próxima chamada
+  sempre tenta a API de novo, protegida pelo circuit breaker já
+  existente. Validado: `import app.main` limpo.
+
+- **A7 — Valores monetários sem `CHECK >= 0`.** Adicionado
+  `CheckConstraint` em `Proposta.valor`, `GrupoCorretor.limite_valor` e
+  `Corretor.limite_valor_diario`. Confirmado zero violações existentes
+  antes de aplicar; migração `migrate_check_valores_nao_negativos_a7.sql`
+  rodada no banco de dev (validado via `pg_constraint`). **Rodar também
+  em produção**, confirmando antes que não há valores negativos lá.
+
+- **A3 e A6 — investigados, não corrigidos.** Ambos se mostraram mais
+  arriscados do que a descrição original da auditoria sugeria — A3
+  esbarra em endpoints sem autenticação nenhuma (não é só trocar a fonte
+  do `criado_por`), e A6 exige mudar o comportamento de importações CSV
+  que hoje funcionam. Movidos para a seção 4.2 (precisam da sua decisão).
+
 O restante da lista (seção 4) continua aguardando priorização — itens que
 precisam de decisão de negócio/produto ficam na seção 4.2.
 
@@ -473,6 +512,8 @@ precisam de decisão de negócio/produto ficam na seção 4.2.
 | C2, C4, C5, C6/C7, C8 | ✅ **FEITOS** em sessão anterior a esta (ver `PROBLEMAS_PENDENTES.txt`) — tabela mantida só por rastreabilidade histórica. |
 | A4 | ✅ **FEITO** — ver seção 3 (paginação real implementada e o usuário optou por não bloquear aguardando validação manual). |
 | M4 | Adicionar auditoria em ~8 routers é mecânico, mas é volume grande de mudança — posso fazer em lote se você aprovar. |
+| A3 | `POST /corretores/importar` e `POST /importacoes/propostas` não têm autenticação nenhuma hoje — corrigir o `criado_por` forjável exige antes decidir se esses endpoints passam a exigir token (mesmo risco do C4: pode quebrar automação hoje sem token). |
+| A6 | Forçar `resolver_corretor()` na importação CSV muda o resultado de importações que hoje funcionam sem essa validação — quero seu aval antes de potencialmente rejeitar/alterar vínculos que já são tratados como válidos operacionalmente. |
 
 ---
 

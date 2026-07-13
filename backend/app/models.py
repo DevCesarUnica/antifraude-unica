@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey,
+    Boolean, CheckConstraint, DateTime, Float, ForeignKey,
     Integer, String, Text, Enum, UniqueConstraint,
     Index,
 )
@@ -84,6 +84,9 @@ class GrupoCorretor(Base):
     original do relatório do WebDeck (ver ANALISE_REGRAS_WEBDECK.md).
     """
     __tablename__ = "grupos_corretores"
+    __table_args__ = (
+        CheckConstraint("limite_valor >= 0", name="ck_grupos_corretores_limite_valor_nao_negativo"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     nome: Mapped[str] = mapped_column(String(200), unique=True, nullable=False, index=True)
@@ -104,6 +107,9 @@ class GrupoCorretor(Base):
 
 class Corretor(Base):
     __tablename__ = "corretores"
+    __table_args__ = (
+        CheckConstraint("limite_valor_diario >= 0", name="ck_corretores_limite_valor_diario_nao_negativo"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     nome: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -186,6 +192,7 @@ class Proposta(Base):
         UniqueConstraint("proposta_id_externo", name="uq_proposta_id_externo"),
         Index("ix_propostas_status", "status"),
         Index("ix_propostas_cpf_cliente", "cpf_cliente"),
+        CheckConstraint("valor >= 0", name="ck_propostas_valor_nao_negativo"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)

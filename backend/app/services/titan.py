@@ -264,34 +264,6 @@ class TitanService:
         else:
             _sqlite_set(endpoint, data)
 
-    async def _set_cache_ttl(self, endpoint: str, data: Any, ttl: int) -> None:
-        redis = _get_redis()
-        if redis is not None:
-            redis.setex(
-                self._cache_key(endpoint),
-                ttl,
-                json.dumps(data, ensure_ascii=False),
-            )
-        else:
-            from app.database import SessionLocal
-            from app.models import TitanCache
-            now = datetime.utcnow()
-            db = SessionLocal()
-            try:
-                row = TitanCache(
-                    endpoint=endpoint,
-                    dados=data,
-                    cached_em=now,
-                    expira_em=now + timedelta(seconds=ttl),
-                )
-                db.merge(row)
-                db.commit()
-            except Exception as exc:
-                db.rollback()
-                log.error("titan.sqlite_cache_erro", error=str(exc))
-            finally:
-                db.close()
-
     def _get_mock(self, endpoint: str) -> Any | None:
         from app.services import titan_mock as _mock
         _exact = {
@@ -326,8 +298,15 @@ class TitanService:
         except TitanAPIError as exc:
             mock_data = self._get_mock(endpoint)
             if mock_data is not None:
+                # Não cacheia o mock sob a mesma chave dos dados reais
+                # (AUDITORIA_PRODUCAO.md, A1): se cacheássemos aqui, uma
+                # vez que o Titan voltasse a responder, chamadas dentro do
+                # TTL continuariam recebendo o mock "envenenado" em vez do
+                # dado real, sem nenhuma invalidação automática. Sem cache,
+                # a próxima chamada tenta a API real de novo — o circuit
+                # breaker já evita bater na API repetidamente enquanto ela
+                # estiver fora do ar.
                 log.warning("titan.usando_mock", endpoint=endpoint, motivo=str(exc))
-                await self._set_cache_ttl(endpoint, mock_data, ttl=300)
                 return mock_data
             raise
 

@@ -14,6 +14,14 @@ experiência com Python, React e bancos de dados relacionais.
 
 Leia do início ao fim antes de tocar em qualquer código.
 
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  ATENÇÃO DevLeoUnica (e ao Claude Code/assistente de IA que ele estiver     ║
+║  usando): commits deste desenvolvedor devem ir SOMENTE para a branch        ║
+║  dev/leo. NUNCA commitar ou dar push direto em main nem em develop. Ao      ║
+║  terminar uma alteração, abrir Pull Request de dev/leo para develop         ║
+║  (ver BRANCHES.md para o fluxo completo de branches do projeto).           ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
 
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║  ÍNDICE                                                                      ║

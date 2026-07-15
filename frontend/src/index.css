@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+[data-theme="dark"] {
+  --bg-primary: #0f172a;
+  --bg-card: #1e293b;
+  --bg-mid: #334155;
+  --bg-subtle: #1e293b;
+  --bg-row-even: #1e293b;
+  --bg-row-odd: #162032;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
+  --border: #334155;
+  --border-mid: #1e293b;
+}
+
+[data-theme="light"] {
+  --bg-primary: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-mid: #f1f5f9;
+  --bg-subtle: #f8fafc;
+  --bg-row-even: #ffffff;
+  --bg-row-odd: #f8fafc;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --border-mid: #f1f5f9;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+select, input, textarea {
+  background-color: var(--bg-mid);
+  color: var(--text-primary);
+}
+
+option {
+  background-color: var(--bg-mid);
+  color: var(--text-primary);
+}

@@ -1,0 +1,159 @@
+================================================================================
+                    TECNOLOGIAS DO SISTEMA ANTIFRAUDE
+================================================================================
+  Última atualização: 30/06/2026
+  Versão: 2.5
+  Projeto: Sistema Antifraude - Unica Promotora
+================================================================================
+
+
+================================================================================
+BACKEND (Python)
+================================================================================
+
+FRAMEWORK E SERVIDOR
+  - FastAPI 0.111.0          Framework web assíncrono para APIs REST
+  - Uvicorn 0.30.1           Servidor ASGI (suporte a WebSocket e HTTP/2)
+
+BANCO DE DADOS
+  - SQLAlchemy 2.0.30        ORM para mapeamento objeto-relacional
+  - Alembic 1.13.1           Migrações de banco de dados
+  - psycopg2-binary 2.9.9    Driver PostgreSQL para Python
+
+VALIDAÇÃO E CONFIGURAÇÃO
+  - Pydantic 2.7.1           Validação e serialização de dados
+  - pydantic-settings 2.3.0  Gerenciamento de configurações via variáveis de ambiente
+  - python-dotenv 1.0.1      Carregamento de arquivos .env
+
+FILAS E TAREFAS ASSÍNCRONAS
+  - Celery 5.4.0             Fila de tarefas distribuídas
+  - Redis 5.0.7              Broker de mensagens para o Celery
+  - Flower 2.0.1             Dashboard de monitoramento do Celery
+  NOTA: o beat_schedule do Celery (workers/celery_app.py) não roda de
+  fato em nenhum ambiente — não existe serviço `celery beat` no
+  docker-compose nem em dev. A tarefa "varredura-propostas-pendentes"
+  (resgate de propostas travadas) segue com esse problema.
+
+AGENDAMENTO INTERNO
+  - APScheduler 3.10.4       Agendador in-process dentro do próprio backend
+                             FastAPI (core/scheduler.py) — não depende de
+                             Celery Beat/worker. Hoje dispara o sync
+                             automático com a Titan (~10s após o backend
+                             subir, a cada 2h, e à meia-noite).
+
+AUTENTICAÇÃO E SEGURANÇA
+  - python-jose 3.3.0        Geração e validação de tokens JWT
+  - passlib[bcrypt] 1.7.4    Hash seguro de senhas com bcrypt
+
+HTTP E INTEGRAÇÃO
+  - httpx 0.27.0             Cliente HTTP assíncrono para consumo de APIs externas
+  - python-multipart 0.0.9   Suporte a upload de formulários multipart
+
+RESILIÊNCIA E LOGS
+  - tenacity 8.3.0           Retry automático com backoff exponencial
+  - structlog 24.2.0         Logging estruturado em JSON
+
+UTILITÁRIOS
+  - uuid 1.30                Geração de identificadores únicos
+
+
+================================================================================
+FRONTEND (TypeScript / React)
+================================================================================
+
+FRAMEWORK E BUILD
+  - React 18.3               Biblioteca UI baseada em componentes
+  - TypeScript 5.4            Tipagem estática sobre JavaScript
+  - Vite 5.3                 Bundler e servidor de desenvolvimento (porta 3000)
+
+ROTEAMENTO E ESTADO
+  - React Router DOM 6.24    Roteamento SPA (Single Page Application)
+  - Zustand 4.5              Gerenciamento de estado global leve
+  - TanStack React Query 5.x Cache e sincronização de dados do servidor
+
+ESTILIZAÇÃO
+  - Tailwind CSS 3.4          Framework CSS utilitário
+  - PostCSS 8.4               Processamento de CSS
+  - Autoprefixer 10.4         Compatibilidade cross-browser automática
+  - clsx 2.1                  Composição condicional de classes CSS
+  - tailwind-merge 2.3        Mesclagem inteligente de classes Tailwind
+  - class-variance-authority  Variantes de componentes com tipagem
+
+COMPONENTES E GRÁFICOS
+  - Recharts 2.12             Gráficos e dashboards baseados em SVG
+  - Lucide React 0.400        Biblioteca de ícones SVG
+
+HTTP E UTILITÁRIOS
+  - Axios 1.7                 Cliente HTTP para consumo da API REST
+  - date-fns 3.6              Manipulação e formatação de datas
+
+
+================================================================================
+RPA (Robotic Process Automation)
+================================================================================
+
+  - Playwright 1.44.0        Automação de browsers (Chromium, Firefox, WebKit)
+  - httpx 0.27.0             Cliente HTTP para integração com APIs
+  - tenacity 8.3.0           Retry para execuções instáveis
+  - structlog 24.2.0         Logging estruturado
+  - python-dotenv 1.0.1      Gerenciamento de variáveis de ambiente
+
+
+================================================================================
+INFRAESTRUTURA E BANCO DE DADOS
+================================================================================
+
+  - PostgreSQL 16             Banco de dados relacional principal em TODOS os ambientes
+                              (dev e produção). Não é usado SQLite.
+  - Redis 7                   Cache e broker de mensagens (Celery)
+  - Docker / Docker Compose   Containerização completa do ambiente de produção
+
+
+================================================================================
+LINGUAGENS
+================================================================================
+
+  - Python 3.11+             Backend e RPA
+  - TypeScript 5.4           Frontend
+  - SQL                      Queries e migrações
+  - HTML / CSS               Interface web
+
+
+================================================================================
+PADRÕES ARQUITETURAIS
+================================================================================
+
+  - SPA (Single Page Application)    Frontend React servido pelo Vite (porta 3000)
+  - REST API                         Backend FastAPI com endpoints JSON (porta 8000)
+  - ORM + Migrations                 SQLAlchemy + Alembic
+  - Task Queue                       Celery + Redis para processamento assíncrono
+  - Scheduler in-process              APScheduler dentro do processo FastAPI — sync
+                                      automático com a Titan sem depender de worker/beat
+  - JWT Authentication               Token Bearer em localStorage, expiração 8h
+  - Circuit Breaker                  Padrão de resiliência para APIs externas
+  - Retry + Backoff                  tenacity em todas as chamadas às APIs externas
+  - Fail-Graceful                    Fonte offline retorna null; outras fontes continuam
+  - RPA                              Playwright para automação bancária
+  - Idempotência                     UniqueConstraint em proposta_id_externo
+  - Vite Proxy                       Dev server em :3000 proxia :8000 (elimina CORS)
+
+
+================================================================================
+INTEGRAÇÕES EXTERNAS
+================================================================================
+
+  Hope / Titan (ceoslab.app)
+    API REST com autenticação Bearer (TITAN_API_KEY).
+    Acesso exclusivo ao banco Hope. Banco hardcodado "HOPE".
+    Endpoints: operações, bancos, produtos, referência.
+
+  Storm Tecnologia
+    API REST com OAuth2 Resource Owner Password Grant.
+    Hub multibanco (BMG, Pan, Prefeituras, etc.).
+    Banco SEMPRE dinâmico — NUNCA hardcodar "HOPE".
+    Endpoints: contratos, antifraude, clientes, colaboradores, simulações.
+
+
+================================================================================
+  Unica Promotora — Sistema Antifraude | Mesa de Crédito
+================================================================================

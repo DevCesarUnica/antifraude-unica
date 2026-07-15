@@ -1,0 +1,115 @@
+================================================================================
+  PROBLEMAS PENDENTES — CRÍTICOS DA AUDITORIA DE PRODUÇÃO
+================================================================================
+
+Lista dos problemas CRÍTICOS encontrados na auditoria técnica de
+pré-produção (C1 a C8) e o que foi feito para corrigir cada um. Detalhe
+completo do achado original (código, cenário de falha) em
+AUDITORIA_PRODUCAO.md, seção 2.
+
+Já corrigido e removido desta lista: C1 (regra BLACKLIST nunca disparava —
+ver AUDITORIA_PRODUCAO.md seção 3), C2 (pipeline duplicada), C3 (fallback de
+status), C4 (endpoints mutantes sem autenticação), C5 (controle de perfil em
+aprovar/bloquear/reprocessar), C6 (Dockerfile do frontend), C7 (secrets
+inseguros sem validação) e C8 (_seed_admin só no startup).
+
+TODOS OS 8 CRÍTICOS DA AUDITORIA ORIGINAL ESTÃO CORRIGIDOS. Detalhe do que
+foi feito abaixo. Achados de severidade ALTO/MÉDIO/BAIXO continuam listados
+só em AUDITORIA_PRODUCAO.md (nunca fizeram parte desta lista de críticos).
+
+--------------------------------------------------------------------------------
+
+CORRIGIDOS NESTA SESSÃO (2026-07-09):
+
+C7. SECRETS INSEGUROS SEM VALIDAÇÃO DE AMBIENTE — CORRIGIDO
+    backend/app/core/config.py::Settings ganhou um model_validator que roda
+    no startup: se ENVIRONMENT=production e SECRET_KEY/TITAN_API_KEY/
+    DATABASE_URL ainda estiverem em qualquer valor conhecido de dev (inclui
+    tanto o default do Python quanto o default embutido no
+    docker-compose.yml, que usa uma string diferente para SECRET_KEY), o
+    processo falha ao subir com um ValueError explicando o que precisa ser
+    configurado — fail-fast em vez de subir silenciosamente com chave JWT
+    pública ou senha de banco conhecida.
+    docker-compose.yml passou a repassar ENVIRONMENT (default "development")
+    pros serviços backend e worker — sem isso a validação nunca dispararia
+    de verdade, porque nada setava production hoje. worker também passou a
+    receber SECRET_KEY (faltava, mesmo objeto Settings é validado lá).
+    Criado backend/.env.example documentando as variáveis que precisam de
+    valor real em produção.
+    Testado com processos isolados (sem afetar o dev real, que já tem um
+    backend/.env próprio, gitignored, com secrets reais): (1) ENVIRONMENT=
+    production + defaults inseguros → falha na hora, mensagem clara citando
+    SECRET_KEY/TITAN_API_KEY/DATABASE_URL; (2) ENVIRONMENT=production +
+    secrets reais → sobe normal; (3) dev local sem ENVIRONMENT → continua
+    "development", sem impacto. Servidor de dev real confirmado saudável
+    (GET /health 200) depois da mudança.
+    Decisão de gestão de segredos em si (Vault, CI/CD, etc.) continua em
+    aberto — isso é infra/processo, não código; o .env.example documenta o
+    que precisa existir, mas não decide onde/como isso é armazenado.
+
+C6. Dockerfile DE FRONTEND AUSENTE — CORRIGIDO
+    Criado frontend/Dockerfile (node:20-alpine, npm ci, expõe 3000, roda
+    `npm run dev -- --host 0.0.0.0` — mesmo padrão de dev com hot-reload já
+    usado pelo backend no docker-compose, já que os dois serviços montam
+    o código via volume). Criado também frontend/.dockerignore excluindo
+    node_modules/dist/*.log — sem isso, o `COPY . .` sobrescreveria o
+    node_modules recém-instalado no container (Linux) pelo node_modules do
+    host (Windows), quebrando binários nativos (esbuild/rollup).
+    Confirmado que não é preciso mexer no proxy do Vite nem na env var
+    NEXT_PUBLIC_API_URL (que já era morta — Vite não lê esse prefixo):
+    o axios do frontend usa VITE_API_URL com fallback para
+    http://localhost:8000 (frontend/src/lib/api.ts), e o docker-compose já
+    publica a porta 8000 do backend no host — então o navegador do
+    desenvolvedor alcança o backend normalmente mesmo rodando via Docker.
+    LIMITAÇÃO: não há Docker disponível neste ambiente para rodar
+    `docker-compose up`/`build` de verdade. Validei o que deu — `npm ci`
+    com o lockfile atual e `npm run dev -- --host 0.0.0.0` (bind em todas
+    as interfaces, necessário para funcionar exposto via container) — mas
+    o build real do Dockerfile em si ainda não foi testado. Rodem
+    `docker-compose up frontend` para confirmar antes de considerar
+    fechado de vez.
+
+C2. PIPELINE DE PROCESSAMENTO DUPLICADA E DIVERGENTE — CORRIGIDO
+    Extraída a lógica compartilhada (vínculo de corretor, motor antifraude,
+    shadow mode, status) para app/services/proposta_pipeline.py::
+    processar_proposta_core(db, proposta_id). routers/propostas.py::
+    _processar_sync (dev) e workers/tasks.py::processar_proposta (Celery/
+    produção) agora chamam essa mesma função — não duas implementações
+    que podem divergir de novo, e sim uma só. Testado de ponta a ponta via
+    servidor real: criei uma proposta pelo shim de dev, confirmei via
+    /debug que corretor_resolucao, resultado_motor e a trilha de auditoria
+    (CRIACAO, ENFILEIRAMENTO, INICIO_ANALISE, VINCULO_CORRETOR,
+    DECISAO_MOTOR) foram todos preenchidos corretamente; proposta de teste
+    removida depois.
+
+C3. FALLBACK DE STATUS ASSUME APROVADO SEM GUARDA — CORRIGIDO
+    Em routers/propostas.py::_processar_sync e workers/tasks.py::
+    processar_proposta, o "else" que assumia APROVADA (e no Celery também
+    disparava enviar_ao_banco automaticamente) foi invertido: só
+    BLOQUEADO explícito bloqueia, qualquer outro valor cai em
+    ANALISE_MANUAL. Fail-safe em vez de fail-open.
+
+C4. ENDPOINTS MUTANTES SEM AUTENTICAÇÃO — CORRIGIDO (lista do C4)
+    Adicionado Depends(verificar_token): DELETE /blacklist/{id},
+    POST /storm/antifraude/{id}/aprovar|recusar|pendenciar,
+    POST /titan/operacoes, todos os GET /relatorios/* (dependency no
+    router) e todos os GET /buscar/* (dependency no router).
+    Nota: reanalisar_contrato do Storm (mesma família de mutação) ficou
+    de fora por não estar na lista original — considerar incluir depois.
+
+C5. CONTROLE DE PERFIL NA APROVAÇÃO/BLOQUEIO DE PROPOSTA — CORRIGIDO
+    routers/propostas.py::aprovar_manual/bloquear_manual/reprocessar agora
+    exigem perfil ADMIN, GESTOR ou ANALISTA (helper _exige_perfil), igual
+    já era feito em reprocessar_aprovadas. OPERADOR recebe 403.
+
+C8. _seed_admin RODAVA A CADA LOGIN — CORRIGIDO
+    Chamada movida de POST /auth/login para o lifespan (startup) do
+    FastAPI em main.py. Login não recria mais o admin padrão.
+
+--------------------------------------------------------------------------------
+
+Para o detalhe técnico completo de cada um (arquivo:linha, trecho de
+código, correção recomendada e risco de aplicar) ver:
+  AUDITORIA_PRODUCAO.md — seção 2 (achados) e seção 4 (correções,
+  separadas entre "seguro corrigir agora" e "precisa de decisão de
+  negócio antes").

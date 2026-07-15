@@ -1,0 +1,1882 @@
+================================================================================
+  SISTEMA ANTIFRAUDE - UNICA PROMOTORA
+  DOCUMENTAÇÃO TÉCNICA COMPLETA
+================================================================================
+  Última atualização: 30/06/2026 (v2.5)
+  Versão do sistema : 2.1.0
+  Repositório       : https://github.com/DevCesarUnica/antifraude-unica
+  Backend           : http://localhost:8000
+  Frontend          : http://localhost:3000
+  Docs interativos  : http://localhost:8000/docs
+================================================================================
+
+
+================================================================================
+  ÍNDICE
+================================================================================
+
+  1.  VISÃO GERAL DO SISTEMA
+  2.  ESTRUTURA DE PASTAS
+  3.  TECNOLOGIAS UTILIZADAS
+  4.  BACKEND — DETALHAMENTO COMPLETO
+      4.1  database.py
+      4.2  models.py
+      4.3  schemas.py
+      4.4  main.py
+      4.5  core/config.py
+      4.6  core/circuit_breaker.py
+      4.7  routers/auth.py
+      4.8  routers/propostas.py
+      4.9  routers/regras.py
+      4.10 routers/usuarios.py
+      4.11 routers/bancos.py
+      4.12 routers/titan.py
+      4.13 routers/storm.py
+      4.14 routers/convenios.py
+      4.15 routers/corretores.py
+      4.16 routers/grupos.py
+      4.17 routers/layouts.py
+      4.18 routers/importacoes.py
+      4.19 routers/averbacoes.py
+      4.20 routers/retornos_banco.py
+      4.21 routers/pendencias.py
+      4.22 routers/logs.py
+      4.23 routers/relatorios.py
+      4.24 routers/blacklist.py
+      4.25 routers/buscar.py           ← BUSCA GLOBAL (v2.5)
+      4.26 services/antifraude.py
+      4.27 services/auditoria.py
+      4.28 services/storm.py
+      4.29 services/hope_adapter.py
+      4.30 services/storm_adapter.py
+      4.31 services/propostas_dashboard.py
+      4.32 services/titan_sync.py
+      4.33 services/storm_sync.py
+      4.34 workers/tasks.py
+  5.  FRONTEND — DETALHAMENTO COMPLETO
+      5.1  main.tsx
+      5.2  App.tsx
+      5.3  components/Header.tsx
+      5.4  components/Layout.tsx
+      5.5  components/DashboardPropostasTable.tsx
+      5.6  components/PropostaDetalheModal.tsx
+      5.7  components/BuscarContratoModal.tsx   ← BUSCA GLOBAL (v2.5)
+      5.8  lib/api.ts
+      5.9  lib/storm-utils.ts
+      5.10 lib/stormAdapter.ts
+      5.11 lib/hopeAdapter.ts
+      5.12 pages/LoginPage.tsx
+      5.13 pages/DashboardPage.tsx
+      5.14 pages/PropostasPage.tsx
+      5.15 pages/RegrasPage.tsx
+      5.16 pages/BancosPage.tsx
+      5.17 pages/UsuariosPage.tsx
+      5.18 pages/StormPage.tsx
+  6.  BANCO DE DADOS — TABELAS E RELACIONAMENTOS
+  7.  FLUXO DE AUTENTICAÇÃO
+  8.  MOTOR ANTIFRAUDE — FLUXO COMPLETO
+  9.  SISTEMA DE BUSCA GLOBAL (v2.5)
+  10. STATUS DE PROPOSTAS — TODOS OS ESTADOS POSSÍVEIS
+  11. USUÁRIOS DO SISTEMA (SEED)
+  12. COMO RODAR O PROJETO
+  13. ENDPOINTS DA API — REFERÊNCIA COMPLETA
+  14. HISTÓRICO DE VERSÕES
+
+
+================================================================================
+  1. VISÃO GERAL DO SISTEMA
+================================================================================
+
+O Sistema Antifraude da Unica Promotora é uma aplicação web interna usada pela
+"Mesa de Crédito" para gerenciar, analisar e aprovar/reprovar propostas de
+crédito consignado vindas de múltiplos bancos e hubs de integração.
+
+PROBLEMA QUE RESOLVE:
+  - Propostas de crédito chegam de múltiplos bancos via APIs externas (Hope/Titan
+    e Storm Tecnologia).
+  - É necessário identificar rapidamente quais propostas têm risco (CPF na
+    blacklist, convênio desconhecido, valor acima do limite, etc.).
+  - A equipe precisa de uma visão centralizada de todos os status em tempo real.
+  - A Mesa de Crédito precisa consultar e operar contratos diretamente nas APIs
+    externas (Storm e Hope) sem sair do sistema.
+
+ARQUITETURA GERAL:
+  - Backend  : API REST Python/FastAPI, banco PostgreSQL (dev e prod).
+  - Frontend : Interface React + TypeScript (Vite), comunicação via axios.
+  - Banco    : PostgreSQL em todos os ambientes. Arquivo antifraude.db NÃO é usado.
+  - Integrações: API Titan/Hope (banco Hope via Ceoslab) e API Storm Tecnologia
+    (hub multibanco: BMG, Pan, Prefeituras, etc.).
+  - Portas  : Backend :8000, Frontend :3000.
+
+SEPARAÇÃO STORM / HOPE (REGRA CRÍTICA — NUNCA VIOLAR):
+  Hope  → BANCO ESPECÍFICO integrado via API Titan (Ceoslab).
+          campo banco="HOPE" é hardcodado APENAS em:
+            backend : services/hope_adapter.py
+            frontend: lib/hopeAdapter.ts
+          Esses são os ÚNICOS locais válidos do sistema. Em qualquer outro
+          arquivo, banco="HOPE" é um BUG.
+
+  Storm → HUB MULTIBANCO que roteia contratos de VÁRIOS bancos (BMG, Pan,
+          Prefeituras, etc.). O campo "banco" é SEMPRE extraído dinamicamente
+          do payload via extrair_banco(raw). NUNCA hardcodar "HOPE" no Storm.
+
+FLUXO DE APROVAÇÃO DE PROPOSTAS:
+  1. Proposta entra via sync — Hope/Titan já roda sozinho por
+     core/scheduler.py (~10s após subir, 2h em 2h, meia-noite);
+     Storm ainda depende de POST /storm/sync manual — ou via
+     POST /propostas/ direto.
+  2. Motor antifraude avalia regras configuradas no banco, calcula score 0–100.
+  3. Se score >= 80 ou regra bloqueante → BLOQUEADA (automático).
+  4. Todos os outros casos → ANALISE_MANUAL (revisão humana obrigatória).
+  5. NUNCA ocorre aprovação automática. Toda APROVADA é decisão humana.
+  6. Analista abre o modal "Opções" no dashboard → Aprovar ou Bloquear.
+
+
+================================================================================
+  2. ESTRUTURA DE PASTAS
+================================================================================
+
+antifraude/
+│
+├── backend/
+│   ├── requirements.txt           ← Dependências Python
+│   ├── seed.py                    ← Popular banco com dados de teste
+│   ├── .env                       ← Variáveis de ambiente (NÃO commitado)
+│   ├── Dockerfile
+│   └── app/
+│       ├── __init__.py
+│       ├── database.py            ← Conexão SQLAlchemy + get_db()
+│       ├── models.py              ← Todos os modelos ORM (tabelas)
+│       ├── schemas.py             ← Schemas Pydantic (validação E/S)
+│       ├── schemas_importacao.py  ← Schemas específicos de importação CSV
+│       ├── schemas_titan.py       ← Schemas de resposta da API Titan
+│       ├── main.py                ← FastAPI app + todos os routers
+│       ├── core/
+│       │   ├── config.py          ← Settings via pydantic-settings + .env
+│       │   ├── circuit_breaker.py ← Circuit Breaker para APIs externas
+│       │   ├── logging.py         ← Logs estruturados (structlog)
+│       │   └── scheduler.py       ← Agendador interno (APScheduler): sync
+│       │        automático com a Titan + varredura de propostas
+│       │        travadas, sem depender de Celery Beat/worker
+│       ├── routers/
+│       │   ├── auth.py            ← Login, logout, /me
+│       │   ├── propostas.py       ← CRUD propostas + dashboard + search
+│       │   ├── regras.py          ← CRUD regras antifraude
+│       │   ├── usuarios.py        ← Gestão de usuários
+│       │   ├── bancos.py          ← Status e produtos de bancos parceiros
+│       │   ├── titan.py           ← Proxy Titan + /titan/sync
+│       │   ├── storm.py           ← Proxy Storm + /storm/sync
+│       │   ├── convenios.py       ← Catálogo de convênios
+│       │   ├── corretores.py      ← CRUD corretores + contatos
+│       │   ├── grupos.py          ← CRUD grupos de corretores
+│       │   ├── layouts.py         ← Layouts de importação CSV
+│       │   ├── importacoes.py     ← Upload e processamento de CSV
+│       │   ├── averbacoes.py      ← Registro de averbações bancárias
+│       │   ├── retornos_banco.py  ← Retornos recebidos dos bancos
+│       │   ├── pendencias.py      ← Pendências vinculadas a propostas
+│       │   ├── logs.py            ← Logs de acesso e auditoria de ações
+│       │   ├── relatorios.py      ← Geração de relatórios
+│       │   ├── blacklist.py       ← CRUD da blacklist de CPFs
+│       │   └── buscar.py          ← Busca global (ADE + CPF + nome)
+│       ├── services/
+│       │   ├── antifraude.py      ← Motor de regras antifraude
+│       │   ├── auditoria.py       ← Trilha de auditoria append-only
+│       │   ├── storm.py           ← Cliente assíncrono OAuth2 Storm
+│       │   ├── hope_adapter.py    ← Adapter Titan/Hope → PropostaCreate
+│       │   ├── storm_adapter.py   ← Adapter Storm → PropostaCreate
+│       │   ├── propostas_dashboard.py ← query_dashboard() e normalizar_proposta()
+│       │   ├── titan_sync.py      ← Sync Hope/Titan → propostas locais
+│       │   ├── storm_sync.py      ← Sync Storm → propostas locais
+│       │   ├── titan.py           ← Cliente TitanService (httpx async)
+│       │   ├── titan_envio.py     ← Envio de proposta APROVADA → POST /operations/create
+│       │   ├── titan_mock.py      ← Mock Titan para testes locais
+│       │   └── banks/             ← Adaptadores por banco (base, hope, registry)
+│       └── workers/
+│           ├── celery_app.py      ← Configuração do Celery (beat_schedule não
+│           │    roda de fato — nenhum serviço `celery beat` está configurado)
+│           └── tasks.py           ← Tasks assíncronas (processar + varredura)
+│
+├── frontend/
+│   ├── package.json
+│   ├── vite.config.ts             ← Proxy :3000 → :8000 para todas as rotas
+│   ├── index.html
+│   └── src/
+│       ├── main.tsx               ← Ponto de entrada React
+│       ├── App.tsx                ← Roteamento SPA (React Router)
+│       ├── index.css              ← Variáveis CSS de tema (dark/light)
+│       ├── lib/
+│       │   ├── api.ts             ← axios + todas as funções de API
+│       │   ├── storm-utils.ts     ← Normalização Storm (tipos + helpers)
+│       │   ├── stormAdapter.ts    ← Adapter Storm (stormSync, extrairBancoStorm)
+│       │   └── hopeAdapter.ts     ← Adapter Hope/Titan (normOperacao, titanSync)
+│       ├── components/
+│       │   ├── Header.tsx                  ← Cabeçalho + nav + atalho Ctrl+K
+│       │   ├── Layout.tsx                  ← Wrapper padrão (header + conteúdo)
+│       │   ├── DashboardPropostasTable.tsx ← Tabela operacional Mesa de Crédito
+│       │   ├── PropostaDetalheModal.tsx    ← Modal detalhes (autônomo/reutilizável)
+│       │   └── BuscarContratoModal.tsx     ← Modal busca global (Ctrl+K)
+│       └── pages/
+│           ├── LoginPage.tsx
+│           ├── DashboardPage.tsx
+│           ├── PropostasPage.tsx
+│           ├── RegrasPage.tsx
+│           ├── BancosPage.tsx
+│           ├── UsuariosPage.tsx
+│           └── StormPage.tsx
+│
+├── rpa/                           ← Scripts Playwright (automação bancária)
+├── docs/                          ← Documentação adicional
+├── docker-compose.yml             ← Sobe PostgreSQL + Redis + backend + worker + frontend
+├── DOCUMENTACAO_TECNICA.txt       ← Este arquivo
+├── ONBOARDING_DESENVOLVEDOR.txt   ← Guia para novo desenvolvedor
+├── HIERARQUIA_USUARIOS.txt
+├── INSTALACAO.txt
+└── TECNOLOGIAS.txt
+
+
+================================================================================
+  3. TECNOLOGIAS UTILIZADAS
+================================================================================
+
+BACKEND:
+  Python 3.11+
+  FastAPI 0.111.0          Framework web assíncrono REST
+  Uvicorn 0.30.1           Servidor ASGI
+  SQLAlchemy 2.0.30        ORM Python ↔ PostgreSQL
+  Alembic 1.13.1           Migrações de banco de dados
+  Pydantic 2.7.1           Validação de dados E/S
+  pydantic-settings 2.3.0  Leitura de .env
+  python-jose 3.3.0        Geração e validação JWT
+  passlib[bcrypt] 1.7.4    Hash de senhas
+  httpx 0.27.0             Cliente HTTP assíncrono (APIs externas)
+  tenacity 8.3.0           Retry com backoff exponencial
+  Celery 5.4.0             Fila de tarefas (prod: requer Redis; beat_schedule
+                           configurado mas sem serviço `celery beat` rodando)
+  redis 5.0.7              Broker Celery + cache
+  flower 2.0.1             Dashboard Celery
+  apscheduler 3.10.4       Agendador in-process (core/scheduler.py) — sync
+                           automático com a Titan, roda dentro do próprio
+                           processo do backend, sem depender do Celery Beat
+  structlog 24.2.0         Logging estruturado JSON
+  python-multipart 0.0.9   Upload de arquivos
+  psycopg2-binary 2.9.9    Driver PostgreSQL
+
+BANCO DE DADOS:
+  PostgreSQL 16             Banco principal em TODOS os ambientes
+  Redis 7                   Broker Celery + cache de sessão
+
+  ATENÇÃO: O arquivo antifraude.db (SQLite) pode existir em disco mas
+  NÃO é usado. A DATABASE_URL aponta sempre para PostgreSQL.
+
+FRONTEND:
+  React 18.3               UI em componentes
+  TypeScript 5.4           Tipagem estática
+  Vite 5.3                 Build tool + dev server (porta 3000)
+  React Router DOM 6.24    Roteamento SPA
+  Axios 1.7                HTTP client
+  TanStack React Query 5.x Cache e re-fetch automático
+  Tailwind CSS 3.4         Estilização utilitária
+  Recharts 2.12            Gráficos SVG
+  Lucide React 0.400       Ícones SVG
+
+PADRÕES DE RESILIÊNCIA:
+  Circuit Breaker (core/circuit_breaker.py) — 3 estados:
+    CLOSED    → chamadas passam normalmente
+    OPEN      → rejeita após N falhas consecutivas
+    HALF_OPEN → testa recuperação com 1 chamada, depois reabre se falhar
+  Retry com tenacity — backoff exponencial para erros de rede/timeout
+  Fail-gracefully no buscar.py — fonte offline retorna null, não para tudo
+
+AUTENTICAÇÃO:
+  JWT Bearer — token salvo em localStorage("token"), usuario em ("usuario")
+  Expiração : configurável via JWT_EXPIRATION_HOURS (padrão: 8h)
+  401 fora de /storm e /titan → logout automático no frontend
+  401 em /storm ou /titan → HTTP 502 (evita logout indevido)
+
+
+================================================================================
+  4. BACKEND — DETALHAMENTO COMPLETO
+================================================================================
+
+--------------------------------------------------------------------------------
+  4.1  backend/app/database.py
+--------------------------------------------------------------------------------
+
+Configura a conexão PostgreSQL via SQLAlchemy e exporta:
+  engine       — conexão com o banco
+  Base         — classe-base para os modelos ORM
+  SessionLocal — fábrica de sessões (autocommit=False)
+  get_db()     — dependency injection: abre sessão, yield, fecha no finally
+
+DATABASE_URL lido de settings.database_url. Formato:
+  postgresql://usuario:senha@host:5432/antifraude
+
+
+--------------------------------------------------------------------------------
+  4.2  backend/app/models.py
+--------------------------------------------------------------------------------
+
+Define TODAS as tabelas do banco com SQLAlchemy Mapped (estilo 2.0).
+Todos os IDs são UUID String(36), gerados por _uuid(). Timestamps em UTC.
+
+TABELA: propostas
+  id (UUID PK), proposta_id_externo (UNIQUE — idempotência)
+  cpf_cliente, nome_cliente, uf_cliente, banco, convenio, produto, valor
+  status (StatusProposta enum), corretor_id (FK → corretores, nullable)
+  score_fraude (int), resultado_motor (str), decisao_detalhes (JSONB)
+  payload_original (JSONB), resposta_banco (JSONB), id_operacao_banco
+  tentativas (int), ultimo_erro (text)
+  criado_em (UTC, indexed), atualizado_em (UTC)
+
+  ÍNDICES: ix_propostas_status, ix_propostas_cpf_cliente
+
+TABELA: corretores
+  id, nome, cpf (UNIQUE), email (indexed), telefone, codigo_externo (UNIQUE)
+  grupo_id (FK → grupos_corretores, nullable), limite_valor_diario
+  ativo, metadados (JSONB), criado_em, atualizado_em
+
+TABELA: grupos_corretores
+  id, nome (UNIQUE), descricao, limite_valor, ativo, criado_em, atualizado_em
+
+TABELA: contatos_corretores
+  id, corretor_id (FK), tipo (TipoContato enum), valor, principal, ativo, criado_em
+
+TABELA: regras_antifraude
+  id, nome, descricao, tipo (TipoRegra enum), parametros (JSONB)
+  peso_score, bloqueante (bool), shadow_mode (bool), prioridade (int)
+  ativo, versao, criado_por, atualizado_por, criado_em, atualizado_em
+  Histórico completo de alterações fica em logs_auditoria
+  (tipo_entidade="regra_antifraude"), não em colunas próprias.
+
+TABELA: blacklist
+  id, tipo (TipoBlacklist enum), valor, motivo, fonte, adicionado_por
+  ativo, criado_em, atualizado_em
+  UNIQUE (tipo, valor), INDEX ix_blacklist_valor
+
+TABELA: usuarios
+  id, email (UNIQUE), username (UNIQUE), nome, cargo
+  perfil (PerfilUsuario enum), senha_hash, ativo, criado_em, atualizado_em
+
+TABELA: convenios
+  id, nome (UNIQUE), banco, ativo, auto_registrado (bool), criado_em
+
+TABELA: auditoria_logs (append-only — NUNCA alterar)
+  id, proposta_id (FK), evento (TipoEvento enum), dados (JSONB)
+  usuario, ip_origem, timestamp
+
+TABELA: logs_acesso
+  id, usuario_id, username, metodo, endpoint, ip, status_code, duracao_ms
+  timestamp (indexed)
+
+TABELA: logs_auditoria (ações de usuários — append-only)
+  id, usuario_id, username, nome, perfil (quem)
+  acao, tipo_entidade, entidade_id (o que)
+  antes (JSONB), depois (JSONB) (estado)
+  risco (NivelRisco enum), ip, user_agent, origem, sucesso, erro, criado_em
+
+TABELA: layouts_importacao + mapeamentos_dados
+  Layouts de CSV: nome, tipo (PROPOSTA|CORRETOR), separador, encoding, cabecalho
+  Mapeamentos: coluna_origem → campo_destino + transformacao + obrigatorio
+
+TABELA: importacoes_propostas + importacoes_corretores
+  Registro de cada upload CSV: arquivo, totais, status, log_erros, criado_por
+
+TABELA: averbacoes
+  id, proposta_id (FK), banco, numero_operacao, status (StatusAverbacao enum)
+  data_averbacao, resposta_banco (JSONB), observacao
+
+TABELA: retornos_banco
+  id, proposta_id (FK nullable), banco, tipo_retorno (TipoRetorno enum)
+  dados (JSONB), processado (bool), observacao, criado_em, processado_em
+
+TABELA: pendencias
+  id, proposta_id (FK nullable), tipo (TipoPendencia enum), descricao
+  responsavel_id (FK → usuarios), prazo, resolvida (bool), resolucao
+
+TABELA: titan_cache
+  endpoint (PK text), dados (JSONB), cached_em, expira_em
+  (TTL gerenciado pela aplicação, não pelo banco)
+
+ENUMS:
+  StatusProposta : ENFILEIRADA | EM_ANALISE | ANALISE_MANUAL | APROVADA |
+                   REPROVADA | BLOQUEADA | ENVIADA_BANCO | CONFIRMADA_BANCO | ERRO
+  ResultadoMotor : APROVADO | MANUAL | BLOQUEADO
+  TipoRegra      : BLACKLIST | VALOR_MAXIMO | BANCO_CONVENIO | UF_BLOQUEADA |
+                   SCORE_RISCO | LIMITE_DIARIO
+  TipoEvento     : CRIACAO | ENFILEIRAMENTO | INICIO_ANALISE | DECISAO_MOTOR |
+                   ENVIO_BANCO | RETORNO_BANCO | ERRO | REPROCESSAMENTO |
+                   ALTERACAO_MANUAL
+  TipoBlacklist  : CPF | CNPJ | TELEFONE | EMAIL
+  PerfilUsuario  : admin | gestor | analista | operador
+  TipoContato    : EMAIL | TELEFONE
+  NivelRisco     : BAIXO | MEDIO | ALTO
+  StatusAverbacao: PENDENTE | AVERBADO | ERRO | CANCELADO
+  TipoRetorno    : APROVACAO | REPROVACAO | PENDENCIA | CANCELAMENTO | INFORMATIVO
+  TipoPendencia  : DOCUMENTO | ASSINATURA | BANCO | DADOS | OUTROS
+  TipoLayout     : PROPOSTA | CORRETOR
+  StatusImportacao: PENDENTE | PROCESSANDO | CONCLUIDO | ERRO
+
+
+--------------------------------------------------------------------------------
+  4.3  backend/app/schemas.py / schemas_importacao.py / schemas_titan.py
+--------------------------------------------------------------------------------
+
+PROPOSTA:
+  PropostaCreate — entrada: proposta_id_externo, cpf_cliente (só dígitos,
+    validado: 11 ou 14), banco, valor (> 0), campos opcionais
+  PropostaOut    — saída completa (id, status, score, motor, datas)
+  PropostaSummary — contadores por status (cards KPI)
+  PropostaDashboardItem — shape Mesa de Crédito:
+    ade, banco, convenio, produto, corretor, valor, status, cpf, nome_cliente,
+    uf_cliente, observacoes, data_importacao, data_atualizacao, data_agendamento,
+    possui_arquivos, score_fraude, resultado_motor, origem, tentativas
+    "ade"    = proposta_id_externo
+    "origem" = "hope" | "storm" | "manual" (prefixo do ADE)
+  PropostasDashboardResponse — { items, total, skip, limit }
+
+AUTH:
+  LoginRequest  — { identificador, senha } (aceita username ou email)
+  TokenResponse — { access_token, token_type, usuario: UsuarioOut }
+
+CORRETOR / GRUPO:
+  CorretorCreate/Update/Out, ContatoCreate/Out, GrupoCreate/Update/Out
+
+REGRA / BLACKLIST:
+  RegraCreate/Update/Out, BlacklistAdd/Out
+
+LAYOUT / IMPORTAÇÃO:
+  LayoutCreate/Update/Out, MapeamentoCreate/Out, ImportacaoOut
+
+AVERBAÇÃO / RETORNO / PENDÊNCIA:
+  AverbacaoCreate/Update/Out, RetornoCreate/Out, PendenciaCreate/Update/Out
+
+LOGS:
+  LogAcessoOut, LogAuditoriaOut
+
+CONVÊNIO:
+  ConvenioCreate/Update/Out
+
+MENSAGEM GENÉRICA:
+  Mensagem — { mensagem: str }
+
+
+--------------------------------------------------------------------------------
+  4.4  backend/app/main.py — Ponto de entrada
+--------------------------------------------------------------------------------
+
+FastAPI app "Antifraude API V2", versão 2.1.0.
+
+LIFESPAN: configure_logging() + Base.metadata.create_all(bind=engine)
+CORS: allow_origins=["*"] — em produção deve ser restrito ao domínio real.
+MIDDLEWARE: loga todo request em logs_acesso (extrai usuario_id do JWT).
+
+ROUTERS REGISTRADOS (ordem):
+  /auth, /usuarios, /propostas, /regras, /titan, /bancos, /storm,
+  /convenios, /corretores, /grupos, /layouts, /importacoes, /averbacoes,
+  /retornos-banco, /pendencias, /logs, /relatorios, /blacklist, /buscar
+
+GET /health → { status: "ok", version: "2.1.0" }
+
+
+--------------------------------------------------------------------------------
+  4.5  backend/app/core/config.py
+--------------------------------------------------------------------------------
+
+Lê variáveis de ambiente via pydantic-settings. Arquivo .env em backend/.
+
+VARIÁVEIS PRINCIPAIS:
+  DATABASE_URL          — obrigatório (PostgreSQL)
+  SECRET_KEY            — obrigatório (JWT signing)
+  JWT_ALGORITHM         — padrão "HS256"
+  JWT_EXPIRATION_HOURS  — padrão 8
+  REDIS_URL             — padrão "redis://localhost:6379/0"
+
+  TITAN_BASE_URL        — padrão "https://hope.titan.ceoslab.app/api"
+  TITAN_API_KEY         — obrigatório para integração Hope
+  TITAN_CACHE_TTL       — segundos de cache (padrão 300)
+  TITAN_TIMEOUT         — timeout HTTP (padrão 30s)
+  TITAN_MAX_RETRIES     — tentativas de retry (padrão 3)
+
+  STORM_BASE_URL        — URL base da API Storm
+  STORM_USERNAME        — usuário OAuth2 da Storm (obrigatório para Storm)
+  STORM_PASSWORD        — senha OAuth2 da Storm (obrigatório para Storm)
+  STORM_CLIENT_ID       — client_id OAuth2 (obrigatório para Storm)
+  STORM_CLIENT_SECRET   — vazio para "public client"
+  STORM_TIMEOUT, STORM_MAX_RETRIES
+
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD   — falhas para OPEN (padrão 5)
+  CIRCUIT_BREAKER_RECOVERY_TIMEOUT    — segundos até HALF_OPEN (padrão 60)
+
+EXEMPLO .env MÍNIMO:
+  DATABASE_URL=postgresql://unica:unica123@localhost:5432/antifraude
+  SECRET_KEY=changeme-em-producao
+  TITAN_API_KEY=sua_chave_titan
+  STORM_USERNAME=seu_usuario
+  STORM_PASSWORD=sua_senha
+  STORM_CLIENT_ID=seu_client_id
+
+
+--------------------------------------------------------------------------------
+  4.6  backend/app/core/circuit_breaker.py
+--------------------------------------------------------------------------------
+
+Proteção contra cascata de erros em APIs externas.
+
+ESTADOS:
+  CLOSED    → normal, todas as chamadas passam
+  OPEN      → N falhas seguidas: rejeita chamadas imediatamente
+  HALF_OPEN → após timeout, testa 1 chamada; se OK → CLOSED, se falha → OPEN
+
+get_breaker(nome) → instância global por nome de serviço.
+Uso: get_breaker("storm_api"), get_breaker("titan_api")
+
+IMPORTANTE: StormAuthError e TitanAuthError NÃO contam como falha
+(erro de credencial ≠ serviço indisponível).
+
+
+--------------------------------------------------------------------------------
+  4.7  routers/auth.py
+--------------------------------------------------------------------------------
+
+POST /auth/login  → { identificador, senha } → TokenResponse
+  Aceita username OU email. Verifica bcrypt. Gera JWT.
+POST /auth/logout → invalida sessão
+GET  /auth/me     → dados do usuário logado (UsuarioOut)
+
+
+--------------------------------------------------------------------------------
+  4.8  routers/propostas.py
+--------------------------------------------------------------------------------
+
+IDEMPOTÊNCIA: POST com mesmo proposta_id_externo retorna existente (HTTP 200).
+  Race condition tratada via captura de IntegrityError + segundo lookup.
+
+ATENÇÃO ORDEM DAS ROTAS: rotas específicas (/summary, /dashboard, /search,
+/reprocessar-aprovadas) DEVEM estar antes de /{proposta_id} no código do
+router. FastAPI faz match em ordem — se /{id} vier primeiro, "dashboard"
+seria interpretado como um proposta_id.
+
+ENDPOINTS:
+  GET  /propostas/summary               Contadores por status (KPI cards)
+  GET  /propostas/dashboard             Mesa de Crédito — delega query_dashboard()
+    Filtros : banco, status, cpf, nome, corretor, valor_min, valor_max,
+              data_inicio, data_fim
+    Sort    : order_by (criado_em*), order_dir (desc*)
+    Paginação: skip=0, limit=50 (máx 200)
+  GET  /propostas/search                Busca textual rápida (v2.5)
+    Params : q (min 2 chars), limit (padrão 50, máx 100)
+    Busca  : ADE ILIKE, nome_cliente ILIKE, cpf_cliente LIKE dígitos
+    Retorna: { query, total, items: [PropostaDashboardItem] }
+    Usa    : normalizar_proposta() + joinedload(corretor)
+  GET  /propostas/                      Lista básica com filtros
+  GET  /propostas/{id}                  Detalhe completo (PropostaOut)
+  GET  /propostas/{id}/debug            Raio-x da decisão antifraude
+  GET  /propostas/{id}/auditoria        Histórico de eventos
+  POST /propostas/                      Cria e enfileira para o motor
+  POST /propostas/{id}/aprovar          ANALISE_MANUAL → APROVADA
+  POST /propostas/{id}/bloquear         qualquer → BLOQUEADA
+  POST /propostas/{id}/reprocessar      ERRO|BLOQUEADA → ENFILEIRADA
+  POST /propostas/reprocessar-aprovadas Reenfileira TODAS as APROVADA (admin/gestor)
+
+MODO DEV (sem Celery/Redis):
+  _processar_sync() em propostas.py roda o motor de forma síncrona inline.
+  Em produção (Docker), substituir por: from app.workers.tasks import processar_proposta
+
+
+--------------------------------------------------------------------------------
+  4.9  routers/regras.py
+--------------------------------------------------------------------------------
+
+GET    /regras/                ?ativo=true    Lista regras (público)
+POST   /regras/                               Cria regra (admin/gestor) — RegraCreate
+GET    /regras/{id}                           Obtém uma regra (público)
+GET    /regras/{id}/auditoria                 Histórico completo (logs_auditoria) desta regra
+PATCH  /regras/{id}                           Atualiza parcialmente (admin/gestor) — RegraUpdate
+DELETE /regras/{id}                           Desativa (admin/gestor, soft delete, ativo=False)
+POST   /regras/simular                        Simulador — roda antifraude.avaliar() contra uma
+                                               proposta transitória (nunca persistida, sem commit)
+
+Toda mutação (criar/atualizar/desativar) grava em logs_auditoria
+(tipo_entidade="regra_antifraude", risco="ALTO") com snapshot antes/depois
+via log_auditoria() — mesma infraestrutura usada pelo resto do sistema.
+RegraAntifraude ganhou shadow_mode, criado_por, atualizado_por (ver seção 4.26).
+
+
+--------------------------------------------------------------------------------
+  4.10 routers/usuarios.py
+--------------------------------------------------------------------------------
+
+GET    /usuarios/              Lista (admin + gestor)
+POST   /usuarios/              Cria (admin)
+PATCH  /usuarios/{id}          Atualiza (admin) — username imutável
+DELETE /usuarios/{id}          Desativa (admin — não pode si mesmo)
+DELETE /usuarios/{id}/excluir  Remove permanentemente (admin)
+
+
+--------------------------------------------------------------------------------
+  4.11 routers/bancos.py
+--------------------------------------------------------------------------------
+
+GET /bancos/                    Lista bancos com status de integração
+GET /bancos/{slug}/status       Status de uma integração específica
+GET /bancos/{slug}/produtos     Produtos disponíveis
+GET /bancos/{slug}/referencia   Dados de referência (com cache)
+
+
+--------------------------------------------------------------------------------
+  4.12 routers/titan.py — Integração Hope/Titan
+--------------------------------------------------------------------------------
+
+Proxy para API Titan (Hope/Ceoslab). Bearer auth, cache interno, retry,
+circuit breaker. TitanAuthError → HTTP 502. TitanAPIError → HTTP 503.
+
+GET  /titan/status                Ping real (latência + estado circuit breaker)
+GET  /titan/bancos                Bancos da Titan
+GET  /titan/bancos/{id}/produtos  Produtos de um banco
+GET  /titan/bancos/{id}/referencia Referência do banco em paralelo
+GET  /titan/referencia            Referência completa
+GET  /titan/operacoes             ?page_size&page&data_inicio&data_fim&status_id
+GET  /titan/operacoes/{id}        Uma operação específica
+POST /titan/operacoes             Cria operação no Titan
+DELETE /titan/cache               Invalida cache (?endpoint= para parcial)
+
+POST /titan/sync  ← SINCRONIZAÇÃO HOPE → LOCAL
+  Importa operações paginadas do Titan como propostas. Idempotente.
+  Params: page_size (50*), max_pages (50*, máx 500), data_inicio,
+          data_fim, status_id
+  Retorna: { importadas, ignoradas, erros }
+  Também disparado automaticamente por core/scheduler.py (ver 4.32) —
+  chamar manualmente só é necessário para forçar uma sincronização
+  imediata fora do ciclo automático.
+
+
+--------------------------------------------------------------------------------
+  4.13 routers/storm.py — Integração Storm Tecnologia
+--------------------------------------------------------------------------------
+
+Proxy para API Storm. OAuth2, retry, circuit breaker.
+StormPermissionError → 403. StormAuthError → 502. StormAPIError → 503.
+
+POST /storm/sync  ← SINCRONIZAÇÃO STORM → LOCAL
+  Importa contratos paginados do Storm como propostas. Idempotente.
+  Params: max_paginas (50*, máx 500), id_banco, id_status, data_inicio, data_fim
+  Retorna: { importadas, ignoradas, erros }
+
+GET  /storm/status              Estado do circuit breaker + token
+POST /storm/status/reset        Reseta o circuit breaker manualmente
+
+GET  /storm/antifraude/contratos              ?esteira=&pagina=
+GET  /storm/antifraude/tipos-recusas
+GET  /storm/antifraude/tipos-pendencias
+POST /storm/antifraude/{id}/aprovar
+POST /storm/antifraude/{id}/recusar           { tipo_recusa_id, observacao? }
+POST /storm/antifraude/{id}/pendenciar        { tipo_pendencia_id, observacao? }
+POST /storm/antifraude/{id}/reanalisar        { observacao }
+
+GET  /storm/contratos                         ?pagina=&cpf=&ff=&id_banco=&id_status=
+GET  /storm/contratos/{ff}/acompanhamento
+GET  /storm/contratos/historico               ?ff=
+GET  /storm/contratos/status
+
+GET  /storm/clientes/cpf/{cpf}
+GET  /storm/clientes/telefone/{telefone}
+
+GET  /storm/colaboradores                     ?pagina=&usuario=&status_usuario=
+GET  /storm/colaboradores/{id}
+GET  /storm/parceiros                         ?pagina=&nome=&cpf_cnpj=&status=
+GET  /storm/parceiros/{id}
+
+GET  /storm/simulacoes/clt        ?cpf=&banco_id=&valor_solicitado=&matricula=
+GET  /storm/simulacoes/fgts       ?cpf=&banco_id=
+
+GET  /storm/bancos
+GET  /storm/orgaos
+
+ESTEIAS VÁLIDAS DA STORM (enum — outros valores retornam HTTP 422):
+  "Analisar/Reanalisar"
+  "Pendentes"
+  "Aprovado aguardando liberação no banco"
+  "Migrados com informações incompletas"
+
+
+--------------------------------------------------------------------------------
+  4.14 routers/convenios.py
+--------------------------------------------------------------------------------
+
+GET    /convenios/      ?ativo=&auto_registrado=
+POST   /convenios/      Cria manualmente (auto_registrado=False)
+PATCH  /convenios/{id}  Atualiza nome, banco ou ativo
+DELETE /convenios/{id}  Desativa
+
+
+--------------------------------------------------------------------------------
+  4.15 routers/corretores.py
+--------------------------------------------------------------------------------
+
+CRUD completo de corretores + gestão de contatos.
+
+GET    /corretores/             ?ativo=&grupo_id=&codigo_externo=&q= (busca nome)
+POST   /corretores/             Cria (CorretorCreate)
+PATCH  /corretores/{id}         Atualiza (CorretorUpdate)
+GET    /corretores/{id}         Detalhe + contatos
+GET    /corretores/{id}/contatos Lista contatos
+POST   /corretores/{id}/contatos Adiciona contato (email/telefone)
+PATCH  /corretores/{id}/contatos/{cid} Atualiza contato
+DELETE /corretores/{id}/contatos/{cid} Remove contato
+DELETE /corretores/{id}         Desativa
+
+Busca externa via Storm: GET /corretores/buscar-externo?codigo= (usa Storm API)
+
+
+--------------------------------------------------------------------------------
+  4.16 routers/grupos.py
+--------------------------------------------------------------------------------
+
+GET    /grupos/        Lista grupos
+POST   /grupos/        Cria (GrupoCreate)
+PATCH  /grupos/{id}    Atualiza (GrupoUpdate)
+DELETE /grupos/{id}    Desativa
+GET    /grupos/{id}/corretores  Lista corretores do grupo
+
+
+--------------------------------------------------------------------------------
+  4.17 routers/layouts.py
+--------------------------------------------------------------------------------
+
+Gerencia layouts de importação de CSV para propostas e corretores.
+
+GET    /layouts/             ?tipo=PROPOSTA|CORRETOR
+POST   /layouts/             Cria layout + mapeamentos
+PATCH  /layouts/{id}         Atualiza configurações
+DELETE /layouts/{id}         Desativa
+GET    /layouts/{id}         Detalhe com mapeamentos
+POST   /layouts/{id}/mapeamentos        Adiciona mapeamento
+PATCH  /layouts/{id}/mapeamentos/{mid}  Atualiza mapeamento
+DELETE /layouts/{id}/mapeamentos/{mid}  Remove mapeamento
+
+
+--------------------------------------------------------------------------------
+  4.18 routers/importacoes.py
+--------------------------------------------------------------------------------
+
+Upload e processamento de arquivos CSV de propostas e corretores.
+
+POST /importacoes/propostas            Upload CSV de propostas
+  Form: layout_id (opcional), arquivo (file upload multipart)
+  Usa layout de mapeamento para mapear colunas → campos PropostaCreate
+  Processa linha a linha; erros por linha sem parar o lote.
+  Retorna ImportacaoOut com totais.
+
+POST /importacoes/corretores           Upload CSV de corretores
+GET  /importacoes/propostas            Histórico de importações de propostas
+GET  /importacoes/corretores           Histórico de importações de corretores
+GET  /importacoes/{id}                 Detalhe de uma importação
+
+
+--------------------------------------------------------------------------------
+  4.19 routers/averbacoes.py
+--------------------------------------------------------------------------------
+
+Registro e acompanhamento de averbações bancárias por proposta.
+
+GET    /averbacoes/                    ?proposta_id=&banco=&status=
+POST   /averbacoes/                    Cria averbação (AverbacaoCreate)
+GET    /averbacoes/{id}                Detalhe
+PATCH  /averbacoes/{id}               Atualiza status e dados (AverbacaoUpdate)
+GET    /propostas/{id}/averbacoes     Averbações de uma proposta
+
+
+--------------------------------------------------------------------------------
+  4.20 routers/retornos_banco.py
+--------------------------------------------------------------------------------
+
+Registro de retornos recebidos dos bancos parceiros.
+
+GET    /retornos-banco/                ?banco=&processado=&tipo_retorno=
+POST   /retornos-banco/                Registra retorno (RetornoCreate)
+GET    /retornos-banco/{id}            Detalhe
+PATCH  /retornos-banco/{id}/processar  Marca como processado
+
+
+--------------------------------------------------------------------------------
+  4.21 routers/pendencias.py
+--------------------------------------------------------------------------------
+
+Pendências vinculadas a propostas (documentação, assinatura, etc.).
+
+GET    /pendencias/                    ?proposta_id=&resolvida=&tipo=
+POST   /pendencias/                    Cria pendência (PendenciaCreate)
+GET    /pendencias/{id}                Detalhe
+PATCH  /pendencias/{id}               Atualiza (PendenciaUpdate)
+POST   /pendencias/{id}/resolver       Resolve a pendência
+
+
+--------------------------------------------------------------------------------
+  4.22 routers/logs.py
+--------------------------------------------------------------------------------
+
+Consulta de logs de acesso e auditoria de ações.
+
+GET /logs/acesso      ?limit=100&offset=0&endpoint=&metodo=&usuario_id=
+  Histórico de todas as requisições HTTP (tabela logs_acesso).
+
+GET /logs/auditoria   ?limit=100&offset=0&usuario_id=&tipo_entidade=&risco=
+  Trilha de auditoria de ações de usuários (tabela logs_auditoria).
+
+
+--------------------------------------------------------------------------------
+  4.23 routers/relatorios.py
+--------------------------------------------------------------------------------
+
+Geração de relatórios consolidados.
+
+GET /relatorios/propostas     ?data_inicio=&data_fim=&banco=&status=
+  Resumo de propostas por período com totais e distribuições.
+
+GET /relatorios/corretores    Desempenho por corretor.
+GET /relatorios/blacklist     Resumo da blacklist com estatísticas.
+
+
+--------------------------------------------------------------------------------
+  4.24 routers/blacklist.py
+--------------------------------------------------------------------------------
+
+CRUD da blacklist de CPFs/CNPJs/telefones/emails.
+
+GET    /blacklist/           ?pagina=&limite=&tipo=&busca= (busca no campo
+                              valor). Retorna também contagem_por_tipo
+                              (contagem sobre a base inteira ativa, não só
+                              a página atual).
+GET    /blacklist/exportar-excel  Exporta toda a blacklist (sem paginação)
+                              em .xlsx. Requer autenticação (Depends
+                              verificar_token) — registra evento
+                              BLACKLIST_EXPORTADA em logs_auditoria.
+POST   /blacklist/           Adiciona à blacklist (EntradaBody). Se o valor
+                              já existir desativado, reativa a entrada
+                              (mantém criado_em, atualiza atualizado_em) em
+                              vez de criar duplicata — 409 se já ativo.
+POST   /blacklist/check      Verifica se um valor está na blacklist.
+DELETE /blacklist/{id}       Remove definitivamente (hard delete). Requer
+                              autenticação.
+POST   /blacklist/import     Importa CSV em lote (upsert por tipo+valor,
+                              relatório de inseridos/pulados/erros por
+                              linha). Requer autenticação.
+
+Coluna atualizado_em (TIMESTAMPTZ, NOT NULL, default now(), onupdate now())
+foi adicionada ao modelo Blacklist para rastrear reativações.
+
+
+--------------------------------------------------------------------------------
+  4.25 routers/buscar.py — BUSCA GLOBAL (v2.5)
+--------------------------------------------------------------------------------
+
+Busca unificada de contratos em múltiplas fontes com deduplicação automática.
+
+ESTRATÉGIA DE PRIORIDADE em /buscar/contrato:
+  1. Hope/Titan  — prioridade máxima (ID numérico, ex: 76525)
+  2. Storm       — secundário (código FF, ex: FF-29/06/2026-1)
+  3. Banco local — complemento (ADE + CPF + nome)
+
+DEDUPLICAÇÃO AUTOMÁTICA:
+  Se Hope encontrou contrato ID=X, remove do local qualquer proposta
+  cujo proposta_id_externo contém X (ex: titan-76525). Isso evita que o
+  mesmo contrato apareça duas vezes (uma vez de cada fonte).
+
+ENDPOINT: GET /buscar/contrato
+  Params : numero (str, min 1 char)
+    → numérico → busca Hope (get_operation)
+    → formato FF-DD/MM/YYYY-N → busca Storm
+    → sempre → busca local por ADE + CPF + nome
+  Retorna: {
+    numero_buscado, total_encontrados,
+    hope: {...} | null,       ← prioridade
+    storm: {...} | null,      ← complementar
+    local: [...],             ← lista deduplicada
+    fontes_com_erro: [...]    ← fontes offline (fail-graceful)
+  }
+
+ENDPOINT: GET /buscar/propostas   ← NOVO (v2.5)
+  Busca textual PURA no banco local. Não acessa APIs externas.
+  Ideal para autocomplete e consulta por CPF/nome completo.
+  Params : q (str, min 2 chars), limit (int, 1–100, padrão 50)
+  Busca  :
+    proposta_id_externo ILIKE '%q%'    ← ADE
+    nome_cliente ILIKE '%q%'           ← nome do cliente
+    cpf_cliente LIKE '%dígitos(q)%'   ← CPF (só dígitos extraídos do q)
+      (só ativo se len(dígitos) >= 3)
+  Dedup  : seen set por proposta_id_externo
+  Sort   : criado_em DESC
+  Retorna: { query, total, resultados: [ContratoLocal] }
+
+FUNÇÃO _busca_local(db, q, limit):
+  Reutilizada internamente por ambos os endpoints.
+  Extrai dígitos do q para comparação de CPF sem máscara.
+
+FUNÇÃO /propostas/search:
+  Mesmo comportamento, mas retorna formato PropostaDashboardItem
+  (com joinedload corretor) via normalizar_proposta().
+
+NORMALIZAÇÃO DE RESPOSTAS:
+  _normalizar_hope(op: dict) → formato padrão com campo "origem": "hope"
+  _normalizar_storm(raw: dict) → formato padrão com "origem": "storm"
+  _normalizar_local(p: Proposta) → formato padrão com "origem": "local"
+
+
+--------------------------------------------------------------------------------
+  4.26 services/antifraude.py — Motor de Regras
+--------------------------------------------------------------------------------
+
+Avalia cada proposta contra todas as regras ativas.
+
+COMPORTAMENTO (CRÍTICO — nunca aprovar automaticamente):
+  score >= 80 OU regra bloqueante (fora de shadow) → BLOQUEADO → BLOQUEADA
+  todos os outros casos                            → MANUAL → ANALISE_MANUAL
+  NUNCA gera status APROVADA automaticamente.
+
+THRESHOLDS:
+  SCORE_MANUAL   = 40  (score >= 40: aviso "risco elevado" no motivo)
+  SCORE_BLOQUEIO = 80  (score >= 80: BLOQUEADO automático)
+
+SHADOW MODE (regras_antifraude.shadow_mode — FASE "Centro de Controle"):
+  Regra com shadow_mode=True é avaliada e aparece em regras_disparadas
+  (efeito="SHADOW"), mas NUNCA soma score_acumulado nem bloqueia — mesmo
+  que bloqueante=True. Serve para observar o comportamento de uma regra
+  nova (ex: fruto de LIMITE_CORRETOR_SHADOW) antes de promovê-la. Regras
+  reais continuam com efeito="REAL" e o comportamento de sempre.
+
+AUTO-MAPEAMENTO DE CONVÊNIOS:
+  Antes de avaliar, _auto_mapear_convenio() cria o convênio em convenios
+  se não existir (auto_registrado=True). Elimina status "NAO_MAPEADA".
+
+TIPOS DE REGRA E PARÂMETROS (parametros é JSONB):
+  BLACKLIST              → consulta tabela blacklist pelo CPF do cliente
+  VALOR_MAXIMO           → valor > params["valor_maximo"]
+  BANCO_CONVENIO         → (banco, convenio) em params["combinacoes"] [[b,c], ...]
+  UF_BLOQUEADA           → uf_cliente em params["ufs"] ["SP", "RJ", ...]
+  SCORE_RISCO            → hoje só 1 fator hardcoded: valor > 3x
+                           params["valor_medio_referencia"]. Não há suporte a
+                           múltiplos fatores apesar do nome genérico (nunca
+                           existiu, nem no motor nem na tela /regras —
+                           AUDITORIA_PRODUCAO.md, M1). Zero regras deste tipo
+                           cadastradas hoje.
+  LIMITE_DIARIO          → soma diária do corretor > params["limite_valor_diario"]
+  LIMITE_CORRETOR_SHADOW → TEM avaliador (_limite_corretor_shadow), compara
+                           proposta.valor contra o limite da Esteira Comercial
+                           (GrupoCorretor) do corretor vinculado. Defesa em
+                           profundidade: nunca soma score nem bloqueia,
+                           mesmo com shadow_mode desligado. Gerada
+                           automaticamente por app/services/gerar_regras_esteiras.py.
+                           NÃO confundir com Esteiras Comerciais — módulo à parte.
+
+SAÍDA SALVA NA PROPOSTA:
+  score_fraude     : int 0–100
+  resultado_motor  : "BLOQUEADO" | "MANUAL"
+  decisao_detalhes : {
+    resultado, score, motivo_principal, flags: [regras REAL disparadas],
+    regras_disparadas: [{regra_id, nome, tipo, score_contribuicao,
+                         bloqueante, motivo, detalhes, efeito: REAL|SHADOW}]
+  }
+
+
+--------------------------------------------------------------------------------
+  4.27 services/auditoria.py
+--------------------------------------------------------------------------------
+
+Trilha de auditoria append-only para propostas (tabela auditoria_logs).
+NUNCA deletar ou alterar registros.
+
+AuditoriaService(db).registrar(proposta_id, evento, dados?, usuario?, ip?)
+log_auditoria(db, req, acao, ...) — registra ação de usuário (logs_auditoria)
+
+
+--------------------------------------------------------------------------------
+  4.28 services/storm.py — Cliente Storm
+--------------------------------------------------------------------------------
+
+StormService — cliente assíncrono OAuth2 para a API Storm.
+
+AUTENTICAÇÃO: Resource Owner Password Grant
+  POST /token → grant_type=password + client_id + username + password
+  Token renovado automaticamente com margem de 2 min antes do vencimento.
+
+CACHE: _TokenCache (módulo-level) + asyncio.Lock
+
+USO:
+  async with StormService() as storm:
+      contratos = await storm.get_contratos(pagina=1)
+      operacoes = await storm.get_operacoes_antifraude(esteira="Pendentes")
+
+EXCEÇÕES:
+  StormAPIError, StormAuthError, StormPermissionError, StormRateLimitError
+
+
+--------------------------------------------------------------------------------
+  4.29 services/hope_adapter.py
+--------------------------------------------------------------------------------
+
+Converte operações da API Titan para PropostaCreate.
+
+REGRA DE OURO: banco = "HOPE" é hardcodado AQUI e SOMENTE AQUI no backend.
+  Titan = sistema exclusivo do banco Hope. O hardcode é correto e intencional.
+  Qualquer outro arquivo com banco="HOPE" é um BUG.
+
+mapear_operacao(op: dict) → dict | None
+  Retorna None se CPF, valor ou ID estiverem ausentes.
+  proposta_id_externo = "titan-{op_id}"
+  Extrai: CPF, nome, UF, convênio, produto, valor de campos aninhados.
+
+
+--------------------------------------------------------------------------------
+  4.30 services/storm_adapter.py
+--------------------------------------------------------------------------------
+
+Converte contratos da API Storm para PropostaCreate.
+
+REGRA DE OURO: banco = NUNCA hardcodado. Storm é hub multibanco.
+  extrair_banco(raw) NUNCA retorna "HOPE".
+
+mapear_contrato(raw: dict) → dict | None
+  Retorna None se CPF, valor ou FF ausentes.
+  proposta_id_externo = "storm-{ff}"
+
+FUNÇÕES DE EXTRAÇÃO (robustas a múltiplos formatos):
+  extrair_banco, extrair_convenio, extrair_produto, extrair_cpf,
+  extrair_nome_cliente, extrair_uf_cliente, extrair_valor, extrair_id_contrato
+
+
+--------------------------------------------------------------------------------
+  4.31 services/propostas_dashboard.py
+--------------------------------------------------------------------------------
+
+Camada de serviço testável para o dashboard operacional.
+
+determinar_origem(proposta_id_externo) → "hope" | "storm" | "manual"
+  "titan-*" → "hope", "storm-*" → "storm", outros → "manual"
+
+normalizar_proposta(p: Proposta) → dict (PropostaDashboardItem)
+  observacoes = ultimo_erro OU motivo_principal OU payload.obs
+  data_agendamento = payload.data_agendamento ou payload.agendamento
+  possui_arquivos = bool(payload com chave arquivos/documentos/files/anexos)
+
+query_dashboard(db, *, banco, status, cpf, nome, corretor, valor_min,
+                valor_max, data_inicio, data_fim, order_by, order_dir,
+                skip, limit) → tuple[list[dict], int]
+  joinedload(Proposta.corretor) — evita N+1 queries
+  limit capeado em 200
+  Colunas ordenáveis: criado_em, atualizado_em, valor, status, banco, nome_cliente
+
+
+--------------------------------------------------------------------------------
+  4.32 services/titan_sync.py
+--------------------------------------------------------------------------------
+
+Sincroniza operações da API Titan como propostas locais.
+
+sincronizar(page_size=50, max_pages=50, data_inicio?, data_fim?, status_id?)
+  Busca operações paginadas (base-0).
+  Usa hope_adapter.mapear_operacao() para conversão.
+  Idempotente via proposta_id_externo = "titan-{id}".
+  Processa motor para cada proposta importada.
+  Retorna: { importadas, ignoradas, erros }
+
+  Chamada manual: POST /titan/sync.
+  Chamada automática: core/scheduler.py (APScheduler, dentro do próprio
+  processo do backend, NÃO depende de Celery Beat/worker) dispara essa
+  mesma função sozinho — ~10s após o backend subir, a cada 2h enquanto o
+  processo estiver ativo, e à meia-noite (America/Sao_Paulo). Storm não
+  tem equivalente automático; storm_sync.sincronizar() só roda via
+  POST /storm/sync manual.
+
+
+--------------------------------------------------------------------------------
+  4.33 services/storm_sync.py
+--------------------------------------------------------------------------------
+
+Sincroniza contratos da API Storm como propostas locais.
+
+sincronizar(max_paginas=50, id_banco?, id_status?, data_inicio?, data_fim?)
+  Usa storm_adapter.mapear_contrato() para conversão.
+  Idempotente via proposta_id_externo = "storm-{ff}".
+  Detecção de paginação defensiva (aceita total_paginas, totalPages, last_page).
+  Retorna: { importadas, ignoradas, erros }
+
+
+--------------------------------------------------------------------------------
+  4.34 workers/tasks.py — Tasks Celery
+--------------------------------------------------------------------------------
+
+Em desenvolvimento (sem Redis): _processar_sync() em routers/propostas.py.
+Em produção (Docker + Redis): worker Celery com queue "propostas".
+
+Task: processar_proposta(proposta_id)
+  ENFILEIRADA → EM_ANALISE → motor → ANALISE_MANUAL ou BLOQUEADA
+
+Task: varredura (Celery Beat, cada 5 min — CONFIGURADA MAS NUNCA ATIVA)
+  Reprocessa ENFILEIRADA presas > 5 min.
+  Marca como ERRO: EM_ANALISE travadas > 10 min.
+  Nenhum ambiente (dev ou docker-compose) roda um serviço `celery beat`,
+  então esse agendamento nunca dispara de fato — permanece no código só
+  para quando houver `celery beat` + worker reais em produção.
+
+  Migrada para core/scheduler.py::_varredura_propostas_pendentes() (ver
+  4.32), que roda a mesma lógica a cada 5 min dentro do próprio processo
+  do backend, chamando processar_proposta_core() direto (síncrono) em vez
+  de enfileirar via Celery — funciona mesmo sem worker/Redis disponível.
+
+
+================================================================================
+  5. FRONTEND — DETALHAMENTO COMPLETO
+================================================================================
+
+NOTA: Todo o frontend é TypeScript (.tsx/.ts). Porta: 3000.
+Proxy Vite em vite.config.ts roteia TODAS as rotas de API para :8000.
+
+--------------------------------------------------------------------------------
+  5.1  main.tsx
+--------------------------------------------------------------------------------
+
+React.StrictMode + BrowserRouter + QueryClientProvider (TanStack).
+
+
+--------------------------------------------------------------------------------
+  5.2  App.tsx — Roteamento SPA
+--------------------------------------------------------------------------------
+
+ROTAS:
+  /               → redirect /dashboard
+  /login          → LoginPage (sem Layout)
+  /dashboard      → DashboardPage (com Layout)
+  /propostas      → PropostasPage
+  /regras         → RegrasPage
+  /bancos         → BancosPage
+  /usuarios       → UsuariosPage
+  /storm          → StormPage
+
+
+--------------------------------------------------------------------------------
+  5.3  components/Header.tsx
+--------------------------------------------------------------------------------
+
+Barra superior fixa. Inclui:
+  - Logo Unica Promotora
+  - Links de navegação: Dashboard | Propostas | Regras | Bancos | Storm
+  - Link "Usuários" visível apenas para admin/gestor
+  - Botão de busca (ícone lupa) que abre BuscarContratoModal
+  - Atalho Ctrl+K registrado via document.addEventListener
+  - Avatar do usuário com dropdown: perfil, tema, logout
+  - Toggle de tema dark/light (salvo em localStorage)
+
+STATE: buscaAberta (bool) — controla renderização do BuscarContratoModal
+
+
+--------------------------------------------------------------------------------
+  5.4  components/Layout.tsx
+--------------------------------------------------------------------------------
+
+Wrapper padrão: <Header /> + <main>{children}</main>.
+Usado por todas as páginas autenticadas.
+
+
+--------------------------------------------------------------------------------
+  5.5  components/DashboardPropostasTable.tsx
+--------------------------------------------------------------------------------
+
+Tabela operacional da Mesa de Crédito.
+
+FILTROS (server-side — só aplicados ao clicar em "Pesquisar"):
+  banco, status (dropdown), CPF, nome, corretor, valor_min/max, data_início/fim
+
+TABELA (15 colunas, scroll horizontal):
+  ADE + chip origem, Arq., Banco, Convênio, Produto, Corretor, Valor (BRL),
+  Situação (badge colorido), CPF, Cliente, Obs., Importação, Atualização,
+  Agendamento, Ações (botão "Opções")
+
+ORDENAÇÃO: clique no cabeçalho → asc/desc server-side
+PAGINAÇÃO: server-side, 50 por página, Anterior/Próxima
+
+MODAL: abre pelo botão "Opções" → <PropostaDetalheModal>
+  Clicar na linha não faz nada (intencional — evita abertura acidental).
+
+
+--------------------------------------------------------------------------------
+  5.6  components/PropostaDetalheModal.tsx
+--------------------------------------------------------------------------------
+
+Modal autônomo e reutilizável para detalhe de proposta + ações.
+
+EXPORTS:
+  default PropostaDetalheModal
+  PropostaDashboard      ← tipo do objeto proposta
+  AuditoriaItem          ← tipo de evento de auditoria
+
+PROPS:
+  proposta: PropostaDashboard
+  onClose: () => void
+  onAprovar?/onBloquear?/onReprocessar? — callbacks com defaults automáticos
+
+CONTEÚDO:
+  Cabeçalho: ADE, StatusBadge, OrigemChip, ScoreChip
+  Dados: banco, convênio, produto, valor, corretor, UF, motor, tentativas
+  Datas: importação, atualização, agendamento
+  Observações/motivo
+  Histórico de auditoria em ordem reversa
+  Ações com confirmação inline:
+    Aprovar     — visível se ANALISE_MANUAL
+    Bloquear    — visível se ANALISE_MANUAL | APROVADA | EM_ANALISE
+    Reprocessar — visível se ERRO | BLOQUEADA
+
+
+--------------------------------------------------------------------------------
+  5.7  components/BuscarContratoModal.tsx — BUSCA GLOBAL (v2.5)
+--------------------------------------------------------------------------------
+
+Modal de busca tipo "command palette" (Spotlight / VS Code).
+Aberto via: Header (clique na lupa) ou Ctrl+K.
+Fechado via: Escape ou clique no backdrop.
+
+COMPORTAMENTO:
+  - Debounce: 300ms após o último caractere digitado
+  - Mínimo: 2 caracteres para disparar a busca
+  - Enter: busca imediata (sem aguardar debounce)
+  - Loading: spinner no ícone de lupa durante a chamada
+
+QUERY:
+  Chama buscarContrato(numero) → GET /buscar/contrato?numero=
+
+EXIBIÇÃO DOS RESULTADOS (seções separadas):
+  ⭐ HOPE / Titan   → prioridade máxima, badge roxo
+  ⚡ Storm          → complementar, badge azul
+  🗄 Banco Local   → lista de registros, badge verde
+
+FORMATOS ACEITOS (mostrado nas dicas):
+  ID numérico       → busca direta Hope (ex: 76525)
+  Código FF Storm   → busca Storm (ex: FF-29/06/2026-1)
+  CPF               → busca local por CPF (ex: 123.456.789-00)
+  Nome / ADE        → busca local por texto (ex: João Silva, titan-76525)
+
+ESTADO DE ERRO: mensagem se backend offline.
+ESTADO VAZIO: mensagem "nenhum contrato encontrado para X".
+ERROS DE FONTES: aviso amarelo quando uma fonte específica está offline.
+
+TIPOS INTERNOS: ContratoHope, ContratoStorm, ContratoLocal, BuscarResult
+
+
+--------------------------------------------------------------------------------
+  5.8  lib/api.ts
+--------------------------------------------------------------------------------
+
+Instância axios com baseURL vazia (usa proxy Vite).
+Interceptor de request: injeta Bearer token do localStorage.
+Interceptor de response: status 401 fora de /storm|/titan → logout.
+
+FUNÇÕES EXPORTADAS (seleção):
+  getPropostasDashboard(params?) → GET /propostas/dashboard
+  getPropostaSummary()          → GET /propostas/summary
+  getPropostaById(id)           → GET /propostas/{id}
+  getAuditoriaProposta(id)      → GET /propostas/{id}/auditoria
+  aprovarProposta(id)           → POST /propostas/{id}/aprovar
+  bloquearProposta(id)          → POST /propostas/{id}/bloquear
+  reprocessarProposta(id)       → POST /propostas/{id}/reprocessar
+  buscarContrato(numero)        → GET /buscar/contrato?numero=    ← busca global
+  buscarPropostasLocal(q, limit)→ GET /buscar/propostas?q=        ← texto puro
+  searchPropostas(q, limit)     → GET /propostas/search?q=        ← formato dashboard
+  [+ Storm, Titan, Regras, Usuários, Auth, Corretores, etc.]
+
+
+--------------------------------------------------------------------------------
+  5.9  lib/storm-utils.ts
+--------------------------------------------------------------------------------
+
+Normalização de dados brutos da API Storm. Lida com dois formatos:
+  /clientes/cpf → clienteDados + contratos embutidos
+  /contratos    → data[] com estrutura diferente
+
+normContrato(ct) → ContratoNorm
+normalizeStormCliente(raw) → ClienteNorm
+mergeClienteAndContratos(cliente, contratos) → ClienteNorm completo
+stormErro(err) → string de erro amigável
+normalizeContratoLista(items) → ContratoNorm[]
+fmtBRL(v) → string formatada em R$
+
+
+--------------------------------------------------------------------------------
+  5.10 lib/stormAdapter.ts
+--------------------------------------------------------------------------------
+
+Camada de abstração frontend para Storm. Re-exporta storm-utils.
+Storm = hub multibanco → banco SEMPRE dinâmico → NUNCA retornar "HOPE".
+
+stormSync(params?) → POST /storm/sync
+extrairBancoStorm(raw) → string (espelha storm_adapter.py#extrair_banco)
+
+
+--------------------------------------------------------------------------------
+  5.11 lib/hopeAdapter.ts
+--------------------------------------------------------------------------------
+
+Normalização para Hope/Titan. banco="HOPE" correto e intencional aqui.
+(Espelha hope_adapter.py no backend — únicos locais válidos.)
+
+normOperacao(op: TitanOperacao) → OperacaoNorm
+titanSync(params?) → POST /titan/sync
+
+
+--------------------------------------------------------------------------------
+  5.12 pages/LoginPage.tsx
+--------------------------------------------------------------------------------
+
+Campo "identificador": aceita username OU email.
+Salva token em localStorage("token"), usuario em localStorage("usuario").
+Navega para /dashboard após login.
+
+
+--------------------------------------------------------------------------------
+  5.13 pages/DashboardPage.tsx
+--------------------------------------------------------------------------------
+
+SEÇÕES:
+  1. KPI Cards: Analisar, Aprovadas, Bloqueadas, Erros.
+     Atualização automática a cada 10s (refetchInterval).
+  2. Gráfico de barras (Recharts): propostas por status.
+  3. Mesa de Crédito: <DashboardPropostasTable />.
+
+
+--------------------------------------------------------------------------------
+  5.14 pages/PropostasPage.tsx
+--------------------------------------------------------------------------------
+
+Tabela de propostas com filtros (status, banco, nome, CPF).
+Botões por status: ANALISE_MANUAL → Aprovar|Bloquear; ERRO|BLOQUEADA → Reprocessar.
+Atualização automática a cada 8s.
+
+
+--------------------------------------------------------------------------------
+  5.15 pages/RegrasPage.tsx
+--------------------------------------------------------------------------------
+
+Centro de Controle do Antifraude — CRUD completo + auditoria + simulador.
+NÃO confundir com Esteiras Comerciais (EsteirasPage.tsx/grupos_corretores) —
+módulos independentes, sem tabelas ou dados compartilhados.
+
+Tipos suportados: BLACKLIST, VALOR_MAXIMO, BANCO_CONVENIO, UF_BLOQUEADA,
+  SCORE_RISCO, LIMITE_DIARIO (com campos dinâmicos por tipo + modo avançado
+  JSON com validação). LIMITE_CORRETOR_SHADOW aparece no seletor marcado
+  "(em breve)" — aceito pelo schema, sem avaliador no motor ainda.
+
+ABA "Regras":
+  KPIs: Total, Ativas, Bloqueantes (fora de shadow), Em Shadow Mode,
+  Última Alteração. Filtros: busca, tipo, ativa/inativa, bloqueante,
+  shadow mode, criador. Badges: ATIVA/INATIVA, BLOQUEANTE, SHADOW, CRÍTICA
+  (bloqueante + peso_score >= 80, fora de shadow).
+  Drawer lateral "Nova/Editar Regra" com validação (nome obrigatório,
+  peso/prioridade não-negativos, JSON válido no modo avançado) e toggle
+  Shadow Mode (aviso quando bloqueante+shadow coexistem).
+  Drawer "Histórico da regra": consome GET /regras/{id}/auditoria
+  (logs_auditoria) — quem criou/editou, quando, antes/depois.
+
+ABA "Simulador":
+  Formulário (CPF fictício, banco, convênio, UF, produto, valor) →
+  POST /regras/simular → mostra resultado, score, motivo e a lista completa
+  de regras_disparadas (nome, tipo, impacto no score, efeito REAL/SHADOW,
+  motivo). Não persiste nada — mesmo motor de produção (antifraude.avaliar).
+
+INTEGRAÇÃO COM PROPOSTAS:
+  PropostaDetalheModal busca GET /propostas/{id}/debug e mostra a seção
+  "Regras Disparadas" (nome, tipo, efeito REAL/SHADOW, impacto no score,
+  motivo) com toggle "Ver Avaliação Completa" (detalhes brutos por regra).
+
+
+--------------------------------------------------------------------------------
+  5.16 pages/BancosPage.tsx
+--------------------------------------------------------------------------------
+
+Painel de status das integrações bancárias. Produtos e referências por banco.
+
+
+--------------------------------------------------------------------------------
+  5.17 pages/UsuariosPage.tsx
+--------------------------------------------------------------------------------
+
+Visível apenas para admin e gestor.
+CRUD com modal unificado criar/editar. Username imutável na edição.
+Senha em branco = mantém a atual. Admin não pode desativar a si mesmo.
+
+
+--------------------------------------------------------------------------------
+  5.18 pages/StormPage.tsx
+--------------------------------------------------------------------------------
+
+ABAS:
+  ANTIFRAUDE  — esteira dropdown, cards de contratos, ações
+  CONTRATOS   — filtros CPF/FF, histórico de movimentações
+  COLABORADORES — busca por nome, grid de cards
+  SIMULAÇÕES  — toggle CLT/FGTS, formulário, resultado JSON
+
+getBancoProposta(raw, origem): origem="storm" → extrairBancoStorm(raw);
+                               origem="hope"  → "HOPE" (hardcode correto).
+
+
+================================================================================
+  6. BANCO DE DADOS — TABELAS E RELACIONAMENTOS
+================================================================================
+
+  usuarios ──────────────────────────────────── (standalone)
+  logs_acesso → (usuario_id nullable, não FK formal)
+  logs_auditoria → usuarios (FK nullable)
+
+  grupos_corretores ◄──── corretores ◄──── propostas
+                          │                │
+                          └── contatos_corretores
+                                           │
+                          propostas.corretor_id → corretores.id (nullable)
+
+  regras_antifraude ─────────────── (standalone, carregadas pelo motor)
+  convenios ─────────────────────── (lookup por nome durante o motor)
+  blacklist ─────────────────────── (lookup por tipo+valor durante o motor)
+  auditoria_logs → propostas (FK proposta_id)
+  averbacoes → propostas (FK proposta_id)
+  retornos_banco → propostas (FK proposta_id, nullable)
+  pendencias → propostas (FK nullable) + usuarios (responsavel, FK nullable)
+  titan_cache ────────────────────── (cache de respostas Titan)
+  layouts_importacao ◄──── mapeamentos_dados
+  importacoes_propostas → layouts_importacao (FK nullable)
+
+IDEMPOTÊNCIA:
+  propostas.proposta_id_externo tem UNIQUE constraint.
+  "titan-{id}"  → operação Hope importada via /titan/sync
+  "storm-{ff}"  → contrato Storm importado via /storm/sync
+  sem prefixo   → entrada manual (POST /propostas/)
+
+NOTA: proposta.convenio é texto livre. Validação pelo motor via tabela convenios.
+Convênios desconhecidos são auto-registrados (auto_registrado=True).
+
+
+================================================================================
+  7. FLUXO DE AUTENTICAÇÃO
+================================================================================
+
+1. Frontend POST /auth/login { identificador, senha }
+2. Backend: aceita username OU email; verifica bcrypt; gera JWT.
+3. Frontend: salva token em localStorage("token"), usuario em ("usuario").
+4. Toda requisição: axios interceptor injeta "Authorization: Bearer {token}".
+5. Backend verificar_token(): busca usuario com ativo=True; 401 se inválido.
+6. Frontend: 401 fora de /storm|/titan → remove localStorage → /login.
+7. 401 de /storm|/titan → HTTP 502 (não faz logout — erro de credencial ext.).
+
+
+================================================================================
+  8. MOTOR ANTIFRAUDE — FLUXO COMPLETO
+================================================================================
+
+ENTRADA: proposta com status = ENFILEIRADA
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 1. Auto-registro de convênio                                 │
+  │    proposta.convenio não existe → cria com auto_registrado  │
+  └─────────────────────────────────────────────────────────────┘
+               │
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 2. Carrega todas as regras ativas (ORDER BY prioridade ASC)  │
+  └─────────────────────────────────────────────────────────────┘
+               │
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 3. Para cada regra avalia:                                   │
+  │    BLACKLIST      — CPF na blacklist?                        │
+  │    VALOR_MAXIMO   — valor > limite?                          │
+  │    BANCO_CONVENIO — combinação na lista proibida?            │
+  │    UF_BLOQUEADA   — UF do cliente bloqueada?                 │
+  │    SCORE_RISCO    — valor > 3x referência (só 1 fator hoje)  │
+  │    LIMITE_DIARIO  — corretor ultrapassaria limite diário?    │
+  │                                                              │
+  │    Se disparou E bloqueante → BLOQUEADA (retorna imediato)   │
+  │    Se disparou E não bloqueante → acumula score              │
+  └─────────────────────────────────────────────────────────────┘
+               │
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 4. Decisão por score acumulado                               │
+  │    score >= 80 → BLOQUEADA (automático)                      │
+  │    score < 80  → ANALISE_MANUAL (revisão humana)             │
+  │    NUNCA → APROVADA automaticamente                          │
+  └─────────────────────────────────────────────────────────────┘
+               │
+  ┌─────────────────────────────────────────────────────────────┐
+  │ 5. Analista: Dashboard → "Opções" → PropostaDetalheModal     │
+  │    → Aprovar  → POST /propostas/{id}/aprovar → APROVADA      │
+  │    → Bloquear → POST /propostas/{id}/bloquear → BLOQUEADA    │
+  └─────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+  9. SISTEMA DE BUSCA GLOBAL (v2.5)
+================================================================================
+
+COMO FUNCIONA:
+  O usuário pressiona Ctrl+K (ou clica na lupa no header) → abre o modal.
+  Digita qualquer coisa (mínimo 2 chars) → debounce 300ms → chama o backend.
+  O backend consulta simultaneamente Hope, Storm e banco local.
+  Resultados chegam prontos e deduplucados — nenhum filtro no React.
+
+QUERY SQL (banco local):
+  WHERE proposta_id_externo ILIKE '%q%'
+     OR nome_cliente ILIKE '%q%'
+     OR cpf_cliente LIKE '%dígitos(q)%'
+  ORDER BY criado_em DESC
+  LIMIT 20
+
+DEDUPLICAÇÃO HOPE ↔ LOCAL:
+  Problema original: buscar "76525" retornava:
+    - Hope ID 76525
+    - Local "titan-76525" (ILIKE '%76525%' bate)
+  Mesmo contrato aparecia 2x.
+
+  Solução aplicada:
+    Após Hope retornar ID=X, filtra do local qualquer proposta
+    onde hope_id ∈ id_externo:
+      local = [r for r in local if hope_id not in (r["id_externo"] or "")]
+
+ENDPOINTS DISPONÍVEIS:
+  GET /buscar/contrato?numero=    — Hope + Storm + Local (modal principal)
+  GET /buscar/propostas?q=        — Local puro (autocomplete)
+  GET /propostas/search?q=        — Local puro formato dashboard
+
+PERFORMANCE:
+  - LIMIT 20 no banco local do /buscar/contrato
+  - LIMIT 50 (padrão) no /buscar/propostas e /propostas/search
+  - Índices existentes: ix_propostas_cpf_cliente, ix_propostas_status
+  - Hope e Storm são chamadas assíncronas com fail-graceful
+
+
+================================================================================
+  10. STATUS DE PROPOSTAS — TODOS OS ESTADOS POSSÍVEIS
+================================================================================
+
+  STATUS              ORIGEM         SIGNIFICADO
+  ─────────────────────────────────────────────────────────────────────────
+  ENFILEIRADA         Automático     Recém-criada, aguardando o motor
+  EM_ANALISE          Automático     Motor iniciou a avaliação
+  ANALISE_MANUAL      Motor          Requer revisão humana (padrão do motor)
+  APROVADA            Humano         Analista aprovou — NUNCA automático
+  REPROVADA           Humano         Analista reprovou definitivamente
+  BLOQUEADA           Motor/Humano   Fraude detectada (score>=80) ou manual
+  ENVIADA_BANCO       Humano/Auto    Proposta enviada ao banco parceiro
+  CONFIRMADA_BANCO    Humano/Auto    Banco confirmou o crédito
+  ERRO                Automático     Falha no processamento
+
+TRANSIÇÕES VIA API:
+  aprovar     : ANALISE_MANUAL → APROVADA
+  bloquear    : qualquer → BLOQUEADA
+  reprocessar : ERRO | BLOQUEADA → ENFILEIRADA
+
+
+================================================================================
+  11. USUÁRIOS DO SISTEMA (SEED)
+================================================================================
+
+  USERNAME  SENHA      NOME              CARGO         PERFIL
+  ────────────────────────────────────────────────────────────
+  admin     admin123   Administrador     Admin         admin
+  cesar     cesar123   César Barros      Gestor        gestor
+  leo       leo123     Leonardo Silva    Analista      analista
+  julia     julia123   Julia Santos      Analista      analista
+  sergio    sergio123  Sergio Oliveira   Operador      operador
+
+Senhas armazenadas com bcrypt (passlib).
+Perfis: admin > gestor > analista > operador (ver HIERARQUIA_USUARIOS.txt)
+
+
+================================================================================
+  12. COMO RODAR O PROJETO
+================================================================================
+
+PRÉ-REQUISITOS: Python 3.11+, Node.js 18+, PostgreSQL 16, Git.
+
+OPÇÃO A — COM DOCKER (recomendado):
+  docker-compose up --build
+  # Sobe PostgreSQL + Redis + Backend + Worker + Flower + Frontend
+  # Backend em :8000, Frontend em :3000
+
+OPÇÃO B — SEM DOCKER (desenvolvimento):
+
+  1. BANCO DE DADOS
+     Ter PostgreSQL rodando. Criar banco:
+       createdb antifraude -U postgres
+
+  2. BACKEND
+     cd backend
+     python -m venv venv
+     venv\Scripts\activate           (Windows)
+     source venv/bin/activate        (Mac/Linux)
+     pip install -r requirements.txt
+
+     Criar backend/.env:
+       DATABASE_URL=postgresql://unica:unica123@localhost:5432/antifraude
+       SECRET_KEY=changeme-local
+       TITAN_API_KEY=sua_chave          # opcional se não for usar Hope
+       STORM_USERNAME=seu_usuario       # opcional se não for usar Storm
+       STORM_PASSWORD=sua_senha
+       STORM_CLIENT_ID=seu_client_id
+
+     Populando o banco:
+       python seed.py
+       # Deve aparecer: "Seed concluido com sucesso!"
+
+     Iniciando o servidor:
+       python -m uvicorn app.main:app --reload --port 8000
+
+  3. FRONTEND (novo terminal)
+     cd frontend
+     npm install
+     npm run dev
+     # Acesse: http://localhost:3000
+
+  4. LOGIN
+     http://localhost:3000 → admin / admin123
+
+DOCUMENTAÇÃO INTERATIVA:
+  http://localhost:8000/docs      (Swagger UI — testar endpoints)
+  http://localhost:8000/redoc     (ReDoc — referência)
+
+SINCRONIZAR PROPOSTAS DO HOPE:
+  Já acontece sozinho (core/scheduler.py): ~10s após o backend subir, a
+  cada 2h, e à meia-noite. O endpoint abaixo só é necessário para forçar
+  uma sincronização imediata, fora do ciclo automático:
+  POST http://localhost:8000/titan/sync
+  { "max_pages": 50 }
+
+SINCRONIZAR PROPOSTAS DA STORM (ainda 100% manual, sem agendamento):
+  POST http://localhost:8000/storm/sync
+  { "max_paginas": 50 }
+
+REPROCESSAR TODAS AS APROVADAS (após mudança no motor):
+  POST http://localhost:8000/propostas/reprocessar-aprovadas
+  (requer admin ou gestor)
+
+
+================================================================================
+  13. ENDPOINTS DA API — REFERÊNCIA COMPLETA
+================================================================================
+
+GET    /health                              Saúde do servidor
+
+--- AUTENTICAÇÃO (sem token) ---
+POST   /auth/login
+POST   /auth/logout
+GET    /auth/me
+
+--- PROPOSTAS ---
+GET    /propostas/summary
+GET    /propostas/dashboard                 Filtros + sort + paginação
+GET    /propostas/search                    Busca textual local (v2.5)
+GET    /propostas/
+GET    /propostas/{id}
+GET    /propostas/{id}/debug
+GET    /propostas/{id}/auditoria
+POST   /propostas/
+POST   /propostas/{id}/aprovar
+POST   /propostas/{id}/bloquear
+POST   /propostas/{id}/reprocessar
+POST   /propostas/reprocessar-aprovadas    Admin/Gestor
+
+--- BUSCA GLOBAL (v2.5) ---
+GET    /buscar/contrato                     ?numero= (Hope + Storm + Local)
+GET    /buscar/propostas                    ?q= (local puro, autocomplete)
+
+--- REGRAS ---
+GET    /regras/
+POST   /regras/
+PATCH  /regras/{id}
+DELETE /regras/{id}
+
+--- USUÁRIOS ---
+GET    /usuarios/                           Admin + Gestor
+POST   /usuarios/                           Admin
+PATCH  /usuarios/{id}                       Admin
+DELETE /usuarios/{id}                       Admin (desativa)
+DELETE /usuarios/{id}/excluir               Admin (remove)
+
+--- BANCOS ---
+GET    /bancos/
+GET    /bancos/{slug}/status
+GET    /bancos/{slug}/produtos
+GET    /bancos/{slug}/referencia
+
+--- TITAN / HOPE ---
+POST   /titan/sync
+GET    /titan/status
+GET    /titan/bancos
+GET    /titan/bancos/{id}/produtos
+GET    /titan/bancos/{id}/referencia
+GET    /titan/referencia
+POST   /titan/operacoes
+GET    /titan/operacoes
+GET    /titan/operacoes/{id}
+DELETE /titan/cache
+
+--- STORM ---
+POST   /storm/sync
+GET    /storm/status
+POST   /storm/status/reset
+GET    /storm/antifraude/contratos
+GET    /storm/antifraude/tipos-recusas
+GET    /storm/antifraude/tipos-pendencias
+POST   /storm/antifraude/{id}/aprovar
+POST   /storm/antifraude/{id}/recusar
+POST   /storm/antifraude/{id}/pendenciar
+POST   /storm/antifraude/{id}/reanalisar
+GET    /storm/contratos
+GET    /storm/contratos/{ff}/acompanhamento
+GET    /storm/contratos/historico
+GET    /storm/contratos/status
+GET    /storm/clientes/cpf/{cpf}
+GET    /storm/clientes/telefone/{tel}
+GET    /storm/colaboradores
+GET    /storm/colaboradores/{id}
+GET    /storm/parceiros
+GET    /storm/parceiros/{id}
+GET    /storm/simulacoes/clt
+GET    /storm/simulacoes/fgts
+GET    /storm/bancos
+GET    /storm/orgaos
+
+--- CONVÊNIOS ---
+GET    /convenios/
+POST   /convenios/
+PATCH  /convenios/{id}
+DELETE /convenios/{id}
+
+--- CORRETORES ---
+GET    /corretores/
+POST   /corretores/
+GET    /corretores/{id}
+PATCH  /corretores/{id}
+DELETE /corretores/{id}
+GET    /corretores/{id}/contatos
+POST   /corretores/{id}/contatos
+PATCH  /corretores/{id}/contatos/{cid}
+DELETE /corretores/{id}/contatos/{cid}
+GET    /corretores/buscar-externo
+
+--- GRUPOS ---
+GET    /grupos/
+POST   /grupos/
+PATCH  /grupos/{id}
+DELETE /grupos/{id}
+GET    /grupos/{id}/corretores
+
+--- LAYOUTS ---
+GET    /layouts/
+POST   /layouts/
+PATCH  /layouts/{id}
+DELETE /layouts/{id}
+GET    /layouts/{id}
+POST   /layouts/{id}/mapeamentos
+PATCH  /layouts/{id}/mapeamentos/{mid}
+DELETE /layouts/{id}/mapeamentos/{mid}
+
+--- IMPORTAÇÕES ---
+POST   /importacoes/propostas
+POST   /importacoes/corretores
+GET    /importacoes/propostas
+GET    /importacoes/corretores
+GET    /importacoes/{id}
+
+--- AVERBAÇÕES ---
+GET    /averbacoes/
+POST   /averbacoes/
+GET    /averbacoes/{id}
+PATCH  /averbacoes/{id}
+GET    /propostas/{id}/averbacoes
+
+--- RETORNOS DE BANCO ---
+GET    /retornos-banco/
+POST   /retornos-banco/
+GET    /retornos-banco/{id}
+PATCH  /retornos-banco/{id}/processar
+
+--- PENDÊNCIAS ---
+GET    /pendencias/
+POST   /pendencias/
+GET    /pendencias/{id}
+PATCH  /pendencias/{id}
+POST   /pendencias/{id}/resolver
+
+--- LOGS ---
+GET    /logs/acesso
+GET    /logs/auditoria
+
+--- RELATÓRIOS ---
+GET    /relatorios/propostas
+GET    /relatorios/corretores
+GET    /relatorios/blacklist
+
+--- BLACKLIST ---
+GET    /blacklist/
+GET    /blacklist/exportar-excel
+POST   /blacklist/
+POST   /blacklist/check
+DELETE /blacklist/{id}
+POST   /blacklist/import
+
+
+================================================================================
+  14. HISTÓRICO DE VERSÕES
+================================================================================
+
+  v1.0 — MVP inicial
+    Dashboard, motor de regras, CRUD propostas, tema dark/light, seed.
+
+  v1.1 — Autenticação JWT
+    Modelo User com hash bcrypt. Login/logout/me. Token Bearer.
+    Todos os routers protegidos. Logout automático em 401.
+
+  v1.2 — Hierarquia de usuários
+    Perfis ADMIN/GESTOR/ANALISTA/OPERADOR. Login por username ou email.
+    Router /usuarios com CRUD. UsersPage no frontend.
+
+  v2.0 — Integração Storm + Titan + Refatoração
+    Módulo core/ (config, circuit_breaker). Storm completo (20+ endpoints,
+    OAuth2, retry, circuit breaker). Integração Titan. Router bancos.py.
+    Logging estruturado. TypeScript. React Router. StormPage 4 abas. BancosPage.
+
+  v2.1 — Auto-mapeamento de convênios + Robô varredura
+    Tabela convenios. Motor auto-registra convênios desconhecidos.
+    GET /propostas/{id}/debug. Router /convenios/. Celery Beat 5 min.
+
+  v2.2 — Titan aprimorado + proxy Vite
+    Auth Titan corrigida (Bearer). TitanAuthError → HTTP 502.
+    Proxy Vite (elimina CORS em dev). Separação Storm/Hope.
+
+  v2.3 — Mesa de Crédito operacional
+    GET /propostas/dashboard com filtros/sort/paginação.
+    PropostaDashboardItem. joinedload(corretor). DashboardPropostasTable.
+
+  v2.4 — Revisão arquitetural completa (26/06/2026)
+    services/hope_adapter.py — banco="HOPE" somente aqui.
+    services/storm_adapter.py — banco sempre dinâmico.
+    services/propostas_dashboard.py — query_dashboard() testável.
+    services/storm_sync.py — sync Storm espelhando titan_sync.
+    Motor: NUNCA aprova automaticamente. Todos → ANALISE_MANUAL.
+    POST /propostas/reprocessar-aprovadas (admin/gestor).
+    Frontend: PropostaDetalheModal.tsx autônomo. stormAdapter.ts. hopeAdapter.ts.
+    Novos routers: corretores, grupos, layouts, importacoes, averbacoes,
+      retornos_banco, pendencias, logs, relatorios, blacklist.
+
+  v2.5 — Correção completa do sistema de busca (30/06/2026)
+    BACKEND:
+    - buscar.py reescrito: busca local por ADE + CPF + nome (OR com ILIKE).
+    - Deduplicação Hope↔Local: Hope ID=X → remove local onde id_externo ⊇ X.
+    - Dedup interno: seen set por proposta_id_externo.
+    - Limit 5 → 20; ORDER BY criado_em DESC garantido.
+    - Novo endpoint GET /buscar/propostas?q= (busca local pura, sem APIs ext.).
+    - Novo endpoint GET /propostas/search?q= (retorna PropostaDashboardItem).
+    - propostas.py: adicionado import Query; /search antes de /{proposta_id}.
+    FRONTEND:
+    - BuscarContratoModal.tsx: debounce 500ms → 300ms.
+    - Min length: 3 → 2 chars.
+    - Placeholder atualizado para mencionar CPF e nome.
+    - Hints atualizados com exemplos de CPF e nome do cliente.
+    - api.ts: adicionados buscarPropostasLocal() e searchPropostas().
+
+================================================================================
+  FIM DA DOCUMENTAÇÃO
+================================================================================

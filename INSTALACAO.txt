@@ -234,8 +234,9 @@ Usuários disponíveis para login:
 HOPE (Titan) — AUTOMÁTICO:
   O backend já sincroniza sozinho (core/scheduler.py, sem precisar de
   Celery Beat/worker): ~10s depois de o backend subir, a cada 2h
-  enquanto o processo estiver ativo, e à meia-noite. Não precisa
-  chamar nada manualmente no dia a dia.
+  enquanto o processo estiver ativo, e de 15 em 15 min em horário
+  comercial (08h-18h, seg-sex) no cenário definitivo (processo 24h).
+  Não precisa chamar nada manualmente no dia a dia.
 
   Para forçar uma sincronização imediata (fora do ciclo automático):
     Acessar: http://localhost:8000/docs

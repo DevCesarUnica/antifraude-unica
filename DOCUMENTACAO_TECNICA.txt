@@ -122,7 +122,8 @@ SEPARAÇÃO STORM / HOPE (REGRA CRÍTICA — NUNCA VIOLAR):
 
 FLUXO DE APROVAÇÃO DE PROPOSTAS:
   1. Proposta entra via sync — Hope/Titan já roda sozinho por
-     core/scheduler.py (~10s após subir, 2h em 2h, meia-noite);
+     core/scheduler.py (~10s após subir, 2h em 2h, e de 15 em 15 min em
+     horário comercial 08h-18h seg-sex no cenário definitivo);
      Storm ainda depende de POST /storm/sync manual — ou via
      POST /propostas/ direto.
   2. Motor antifraude avalia regras configuradas no banco, calcula score 0–100.
@@ -844,9 +845,12 @@ GET /relatorios/blacklist     Resumo da blacklist com estatísticas.
 CRUD da blacklist de CPFs/CNPJs/telefones/emails.
 
 GET    /blacklist/           ?pagina=&limite=&tipo=&busca= (busca no campo
-                              valor). Retorna também contagem_por_tipo
-                              (contagem sobre a base inteira ativa, não só
-                              a página atual).
+                              valor, aceita o valor com ou sem máscara —
+                              compara tanto o texto digitado quanto a
+                              versão só com dígitos, já que o valor é
+                              armazenado normalizado no banco). Retorna
+                              também contagem_por_tipo (contagem sobre a
+                              base inteira ativa, não só a página atual).
 GET    /blacklist/exportar-excel  Exporta toda a blacklist (sem paginação)
                               em .xlsx. Requer autenticação (Depends
                               verificar_token) — registra evento
@@ -1083,7 +1087,8 @@ sincronizar(page_size=50, max_pages=50, data_inicio?, data_fim?, status_id?)
   Chamada automática: core/scheduler.py (APScheduler, dentro do próprio
   processo do backend, NÃO depende de Celery Beat/worker) dispara essa
   mesma função sozinho — ~10s após o backend subir, a cada 2h enquanto o
-  processo estiver ativo, e à meia-noite (America/Sao_Paulo). Storm não
+  processo estiver ativo, e de 15 em 15 min em horário comercial (08h-18h,
+  seg-sex, America/Sao_Paulo) no cenário definitivo (processo 24h). Storm não
   tem equivalente automático; storm_sync.sincronizar() só roda via
   POST /storm/sync manual.
 
@@ -1638,7 +1643,8 @@ DOCUMENTAÇÃO INTERATIVA:
 
 SINCRONIZAR PROPOSTAS DO HOPE:
   Já acontece sozinho (core/scheduler.py): ~10s após o backend subir, a
-  cada 2h, e à meia-noite. O endpoint abaixo só é necessário para forçar
+  cada 2h, e de 15 em 15 min em horário comercial (08h-18h, seg-sex) no
+  cenário definitivo. O endpoint abaixo só é necessário para forçar
   uma sincronização imediata, fora do ciclo automático:
   POST http://localhost:8000/titan/sync
   { "max_pages": 50 }

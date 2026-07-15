@@ -307,7 +307,8 @@ estou construindo.
     etc.) + robô RPA pra login (botão "BMG Robô - Liberar login"). Meu
     sistema já faz sync automático via API pro Hope/Titan — de fato
     automático desde que criei core/scheduler.py (roda ~10s após o
-    backend subir, a cada 2h, e à meia-noite; antes disso só existia
+    backend subir, a cada 2h, e de 15 em 15 min em horário comercial
+    08h-18h seg-sex no cenário definitivo; antes disso só existia
     POST /titan/sync manual, sem nenhum agendamento funcionando de
     verdade). O Storm continua exigindo POST /storm/sync manual, sem
     agendamento — estrategicamente melhor pros bancos que já tenho
@@ -340,8 +341,9 @@ estou construindo.
 
   Onde meu sistema já é mais rico / mais moderno:
     - Sync automático via API para Hope/Titan, sem intervenção manual
-      (core/scheduler.py: ~10s após subir o backend, a cada 2h, e à
-      meia-noite). Storm ainda depende de POST /storm/sync manual.
+      (core/scheduler.py: ~10s após subir o backend, a cada 2h, e de
+      15 em 15 min em horário comercial 08h-18h seg-sex no cenário
+      definitivo). Storm ainda depende de POST /storm/sync manual.
       WebDeck depende de upload manual de CSV ou robô RPA para a
       maioria dos bancos.
     - Esteiras Comerciais com KPIs, busca e drawer de vínculos (WebDeck

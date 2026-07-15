@@ -39,7 +39,8 @@ AGENDAMENTO INTERNO
                              FastAPI (core/scheduler.py) — não depende de
                              Celery Beat/worker. Hoje dispara o sync
                              automático com a Titan (~10s após o backend
-                             subir, a cada 2h, e à meia-noite).
+                             subir, a cada 2h, e de 15 em 15 min em horário
+                             comercial 08h-18h seg-sex no cenário definitivo).
 
 AUTENTICAÇÃO E SEGURANÇA
   - python-jose 3.3.0        Geração e validação de tokens JWT

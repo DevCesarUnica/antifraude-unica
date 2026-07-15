@@ -84,7 +84,8 @@ CENÁRIO TÍPICO DO DIA A DIA:
 
   8h00 — Backend sobe e já sincroniza sozinho com o Hope/Titan:
     → core/scheduler.py dispara o sync ~10s após o processo subir,
-      de novo a cada 2h enquanto estiver ativo, e à meia-noite
+      de novo a cada 2h enquanto estiver ativo, e de 15 em 15 min em
+      horário comercial (08h-18h, seg-sex) no cenário definitivo
       (não depende de ninguém clicar em nada nem de Celery Beat)
     → Motor antifraude processa cada proposta importada automaticamente
     → Storm ainda não tem agendamento — se precisar, chamar
@@ -210,7 +211,8 @@ antifraude/
 │   │   ├── config.py     → Lê .env. Use settings.xxx em qualquer lugar.
 │   │   ├── circuit_breaker.py → Proteção contra cascata de erros externos.
 │   │   └── scheduler.py  → Agendador interno (APScheduler). Sync automático
-│   │        com a Titan: ~10s após subir, a cada 2h, e à meia-noite.
+│   │        com a Titan: ~10s após subir, a cada 2h, e de 15 em 15 min
+│   │        em horário comercial (08h-18h, seg-sex) no cenário definitivo.
 │   │        Também roda a varredura de propostas travadas a cada 5 min
 │   │        (equivalente ao beat_schedule do Celery, que não roda de
 │   │        fato). Não depende de Celery Beat/worker.
@@ -616,8 +618,9 @@ SYNC (importar contratos para o banco local):
 
   Desde core/scheduler.py, esse sync também dispara sozinho, sem
   chamada manual: ~10s após o backend subir, a cada 2h enquanto o
-  processo estiver ativo, e à meia-noite (America/Sao_Paulo). Roda
-  dentro do próprio processo FastAPI (APScheduler) — diferente da
+  processo estiver ativo, e de 15 em 15 min em horário comercial
+  (08h-18h, seg-sex, America/Sao_Paulo) no cenário definitivo (processo
+  24h). Roda dentro do próprio processo FastAPI (APScheduler) — diferente da
   tarefa "varredura" abaixo, NÃO depende de Celery Beat/worker.
   O POST /titan/sync manual continua existindo, útil para forçar uma
   sincronização imediata fora do ciclo automático.

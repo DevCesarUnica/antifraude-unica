@@ -38,7 +38,7 @@ interface RespostaUnificada {
 interface Grupo { id: string; nome: string; ativo: boolean; }
 
 const EMPTY_FORM = {
-  nome: "", cpf: "", email: "", telefone: "", grupo_id: "", limite_valor_diario: 0,
+  nome: "", cpf: "", codigo_externo: "", email: "", telefone: "", grupo_id: "", limite_valor_diario: 0,
 };
 
 // ── Badges ────────────────────────────────────────────────────────────────────
@@ -185,7 +185,7 @@ export default function CorretoresPage() {
 
   const abrirEditar = (c: CorretorUnificado) => {
     setSelecionado(c);
-    setForm({ nome: c.nome, cpf: c.codigo, email: c.email ?? "", telefone: "", grupo_id: "", limite_valor_diario: 0 });
+    setForm({ nome: c.nome, cpf: "", codigo_externo: c.codigo, email: c.email ?? "", telefone: "", grupo_id: "", limite_valor_diario: 0 });
     setErroModal(""); setModal("editar");
   };
 
@@ -194,6 +194,7 @@ export default function CorretoresPage() {
     try {
       const payload = {
         ...form,
+        codigo_externo: form.codigo_externo || null,
         email: form.email || null,
         telefone: form.telefone || null,
         grupo_id: form.grupo_id || null,
@@ -203,6 +204,7 @@ export default function CorretoresPage() {
       } else if (selecionado) {
         await atualizarCorretor(selecionado.id, {
           nome: form.nome,
+          codigo_externo: form.codigo_externo || null,
           email: form.email || null,
           telefone: form.telefone || null,
           grupo_id: form.grupo_id || null,
@@ -631,6 +633,7 @@ export default function CorretoresPage() {
               {[
                 { label: "Nome",     key: "nome",     type: "text"  },
                 { label: "CPF",      key: "cpf",      type: "text",  disabled: modal === "editar" },
+                { label: "Código",   key: "codigo_externo", type: "text" },
                 { label: "E-mail",   key: "email",    type: "email" },
                 { label: "Telefone", key: "telefone", type: "text"  },
               ].map(({ label, key, type, disabled }) => (

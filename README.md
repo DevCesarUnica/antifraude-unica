@@ -2,6 +2,8 @@
 
 Sistema Antifraude e Automação de Propostas Financeiras — Unica Promotora
 
+Desenvolvido por [cesaraaugustoo](https://github.com/cesaraaugustoo).
+
 ---
 
 ## Tecnologias

@@ -14,7 +14,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
@@ -87,7 +87,17 @@ def listar(
     if tipo:
         q = q.filter(Blacklist.tipo == tipo.upper())
     if busca:
-        q = q.filter(Blacklist.valor.ilike(f"%{busca}%"))
+        busca_digitos = re.sub(r"\D", "", busca)
+        if busca_digitos and busca_digitos != busca:
+            # busca com máscara (ex: "001.277.518-58") — compara tanto o texto
+            # digitado quanto a versão só com dígitos, já que o valor é
+            # armazenado normalizado (sem pontuação) no banco.
+            q = q.filter(or_(
+                Blacklist.valor.ilike(f"%{busca}%"),
+                Blacklist.valor.ilike(f"%{busca_digitos}%"),
+            ))
+        else:
+            q = q.filter(Blacklist.valor.ilike(f"%{busca}%"))
     total = q.count()
     items = q.order_by(Blacklist.criado_em.desc()).offset((pagina - 1) * limite).limit(limite).all()
 
@@ -148,9 +158,12 @@ def exportar_excel(
         cell.alignment = Alignment(horizontal="center")
 
     for e in entradas:
+        # CPF/CNPJ/telefone viram número na planilha (em vez de texto), com
+        # formatação de célula que preserva os zeros à esquerda na exibição.
+        valor_celula: Any = int(e.valor) if e.valor.isdigit() else e.valor
         ws.append([
             e.tipo.value if hasattr(e.tipo, "value") else e.tipo,
-            e.valor,
+            valor_celula,
             e.motivo,
             e.fonte or "",
             e.adicionado_por or "",
@@ -158,6 +171,8 @@ def exportar_excel(
             _fmt_data_excel(e.criado_em),
             _fmt_data_excel(e.atualizado_em),
         ])
+        if isinstance(valor_celula, int):
+            ws.cell(row=ws.max_row, column=2).number_format = "0" * len(e.valor)
 
     ws.auto_filter.ref = ws.dimensions
     ws.freeze_panes = "A2"

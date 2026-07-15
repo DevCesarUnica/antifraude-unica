@@ -10,8 +10,8 @@ O backend deste projeto não fica no ar 24h (só roda enquanto alguém está
 trabalhando nele), então um cron fixo de meia-noite sozinho não seria
 suficiente para o sync — o processo estaria desligado nesse horário. Por
 isso o sync roda assim que o processo sobe, se repete a cada 2h enquanto
-ativo, e também tem um cron de meia-noite para quando rodar 24h num
-servidor.
+ativo, e também tem um cron de 15 em 15 min em horário comercial (08h–18h,
+seg-sex) para o cenário definitivo, com o processo no ar 24h num servidor.
 
 A varredura de propostas travadas (SLA de minutos, não de horas) só faz
 sentido como intervalo curto — roda a cada 5 min enquanto o processo
@@ -139,14 +139,14 @@ def iniciar_scheduler() -> None:
         replace_existing=True,
     )
 
-    # 3. Agendamento diário à meia-noite (efetivo só se o processo ficar
-    #    no ar 24h, ex: deploy em servidor).
+    # 3. Cenário definitivo (processo no ar 24h, ex: deploy em servidor):
+    #    sync de 15 em 15 min em horário comercial (08h–18h, seg-sex).
     scheduler.add_job(
         _sync_titan_diario,
-        CronTrigger(hour=0, minute=0),
-        id="titan_sync_diario",
+        CronTrigger(day_of_week="mon-fri", hour="8-18", minute="*/15"),
+        id="titan_sync_horario_comercial",
         replace_existing=True,
-        misfire_grace_time=3600,
+        misfire_grace_time=900,
     )
 
     # 4. Robô de varredura — resgata propostas travadas (equivalente ao

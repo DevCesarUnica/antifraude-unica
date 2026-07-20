@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w \"backend health: %{http_code}\\\\n\" http://localhost:8000/health --max-time 5)",
+      "Bash(curl -s -o /dev/null -w \"frontend: %{http_code}\\\\n\" http://localhost:3000 --max-time 5)",
+      "Bash(where chromium-cli *)",
+      "Bash(npx tsc *)",
+      "Bash(python -m json.tool)",
+      "Bash(git checkout *)",
+      "Bash(git merge main -m ' *)",
+      "Bash(git commit -m ' *)",
+      "Bash(netstat -ano)",
+      "Bash(powershell -NoProfile -Command \"Stop-Process -Id 4084 -Force\")",
+      "Bash(nohup npm run dev)",
+      "Read(//tmp/**)",
+      "Bash(curl -s http://localhost:3000/src/pages/UsuariosPage.tsx --max-time 8 -o /tmp/usuarios_check.txt -w \"http_status: %{http_code}\\\\n\")",
+      "Bash(./venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload)",
+      "PowerShell(Get-Process | Where-Object { $_.ProcessName -match \"python\" } | Select-Object Id, ProcessName, StartTime)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:8000/docs --max-time 5)"
+    ]
+  }
+}

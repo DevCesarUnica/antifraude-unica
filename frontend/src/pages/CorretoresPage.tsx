@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import Header from "../components/Header";
 import {
   getCorretoresUnificados,
-  criarCorretor, atualizarCorretor, desativarCorretor,
+  criarCorretor, atualizarCorretor, desativarCorretor, getCorretorById,
   getGrupos, importarCorretoresCSV,
   iniciarExportacaoCorretores, statusExportacaoCorretores, baixarExportacaoCorretores,
 } from "../lib/api";
@@ -183,10 +183,23 @@ export default function CorretoresPage() {
     setForm(EMPTY_FORM); setErroModal(""); setModal("criar");
   };
 
-  const abrirEditar = (c: CorretorUnificado) => {
+  const abrirEditar = async (c: CorretorUnificado) => {
     setSelecionado(c);
     setForm({ nome: c.nome, cpf: "", codigo_externo: c.codigo, email: c.email ?? "", telefone: "", grupo_id: "", limite_valor_diario: 0 });
     setErroModal(""); setModal("editar");
+    try {
+      const detalhe = await getCorretorById(c.id);
+      setForm((f) => ({
+        ...f,
+        cpf: detalhe.cpf ?? "",
+        codigo_externo: detalhe.codigo_externo ?? "",
+        telefone: detalhe.telefone ?? "",
+        grupo_id: detalhe.grupo_id ?? "",
+        limite_valor_diario: detalhe.limite_valor_diario ?? 0,
+      }));
+    } catch {
+      // mantém os valores parciais já preenchidos a partir da listagem
+    }
   };
 
   const salvar = async () => {
@@ -631,11 +644,11 @@ export default function CorretoresPage() {
 
             <div className="flex flex-col gap-3">
               {[
-                { label: "Nome",     key: "nome",     type: "text"  },
-                { label: "CPF",      key: "cpf",      type: "text",  disabled: modal === "editar" },
-                { label: "Código",   key: "codigo_externo", type: "text" },
-                { label: "E-mail",   key: "email",    type: "email" },
-                { label: "Telefone", key: "telefone", type: "text"  },
+                { label: "Nome",           key: "nome",           type: "text"  },
+                { label: "CPF",            key: "cpf",            type: "text",  disabled: modal === "editar" },
+                { label: "Código Externo", key: "codigo_externo", type: "text"  },
+                { label: "E-mail",         key: "email",          type: "email" },
+                { label: "Telefone",       key: "telefone",       type: "text"  },
               ].map(({ label, key, type, disabled }) => (
                 <div key={key}>
                   <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--text-muted)" }}>{label}</label>

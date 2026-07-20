@@ -35,6 +35,7 @@ from app.core.logging import log
 
 SP_TZ = ZoneInfo("America/Sao_Paulo")
 JANELA_RETROATIVA_DIAS = 3  # margem de segurança para operações que chegaram atrasadas
+STATUS_ID_ANALISE_PROMOTORA = 1250  # Titan operationStatusID — só essa fase interessa ao antifraude
 INTERVALO_HORAS = 2  # frequência de re-sync da Titan enquanto o backend está ativo
 INTERVALO_VARREDURA_MINUTOS = 5  # frequência do robô de propostas travadas
 LIMITE_ENFILEIRADA_MINUTOS = 5  # ENFILEIRADA parada há mais que isso é reprocessada
@@ -54,6 +55,7 @@ async def _sync_titan_diario() -> None:
             page_size=100,
             max_pages=200,
             data_inicio=inicio.isoformat(),
+            status_id=STATUS_ID_ANALISE_PROMOTORA,
         )
         log.info("scheduler.titan_sync_diario_concluido", **resultado)
     except Exception as exc:
@@ -145,6 +147,15 @@ def iniciar_scheduler() -> None:
         _sync_titan_diario,
         CronTrigger(day_of_week="mon-fri", hour="8-18", minute="*/15"),
         id="titan_sync_horario_comercial",
+        replace_existing=True,
+        misfire_grace_time=900,
+    )
+
+    # 3b. Fim de semana (sáb-dom): sync de 15 em 15 min das 06h às 20h.
+    scheduler.add_job(
+        _sync_titan_diario,
+        CronTrigger(day_of_week="sat,sun", hour="6-20", minute="*/15"),
+        id="titan_sync_fim_semana",
         replace_existing=True,
         misfire_grace_time=900,
     )
